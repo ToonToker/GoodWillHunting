@@ -1,0 +1,24 @@
+{
+  "name": "horus-multi-snipe",
+  "version": "0.2.0",
+  "description": "Headless multi-account ShopGoodwill sniper with NTP-synced precision timing.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "node-schedule": "^2.1.1",
+    "p-queue": "^8.1.0",
+    "undici": "^7.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.14",
+    "@types/node-schedule": "^2.1.7",
+    "tsx": "^4.20.5",
+    "typescript": "^5.8.2"
+  }
+}
