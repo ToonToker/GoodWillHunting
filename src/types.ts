@@ -19,6 +19,7 @@ export interface LoginResponse {
   message?: string;
   token?: string;
   jwt?: string;
+  data?: Record<string, unknown>;
 }
 
 export interface FavoriteItem {

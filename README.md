@@ -5,19 +5,31 @@ A high-performance, multi-account, API-only sniper dashboard for ShopGoodwill.
 ## Setup
 
 1. Install **Node.js 20+**.
-2. Install dependencies:
+2. Install required packages:
 
 ```bash
 npm install
 ```
 
-3. Create account file:
+3. Install project dependencies/lockfile:
 
 ```bash
 cp accounts.example.json accounts.json
 ```
 
 4. Start the app:
+
+```bash
+npm run dev
+```
+
+4. Create account file:
+
+```bash
+cp accounts.example.json accounts.json
+```
+
+5. Start the app:
 
 ```bash
 npm run dev
@@ -39,26 +51,33 @@ Create `accounts.json` in the project root:
 ]
 ```
 
-## New Staged Workflow (Query → Set Max → Confirm)
+## Staged Workflow (Query → Display → Confirm)
 
-1. Enter **Item ID or URL** in the **Query Item** input.
-2. Review the item details once it appears in the Battle Map.
-3. Enter your **Max Bid** for that row.
-4. Click **Lock Snipe** to authorize the automated 2.5s strike window.
+1. Enter an Item ID (or ShopGoodwill item URL) in the **Query** bar.
+2. Review item details in the **UNCONFIRMED** list/table row (title, current price, end time).
+3. Input your **Max Bid**.
+4. Click **Lock Snipe** to authorize the automated strike.
 
 ### Status badges
 
-- **UNCONFIRMED** (yellow): item queried, waiting for bid lock.
-- **CONFIRMED** (green): lock complete, item is queued for execution.
-- **ENDED** (red): auction has closed.
+- **UNCONFIRMED** (yellow): query successful, waiting for max-bid lock.
+- **CONFIRMED** (green): locked in and ready for strike.
+- **ENDED** (red): auction completed.
 
 Only **CONFIRMED** items are eligible for background snipe execution.
 
-## API notes
+## API mapping (2026)
 
 - Base API URL: `https://buyerapi.shopgoodwill.com/api/`
-- Query endpoint used for item lookup: `/Auction/GetItemDetail`
-- Requests include mandatory headers for buyerapi requests:
+- Login endpoint: `/SignIn/Login`
+- Query endpoint used for item lookup: `/Auction/GetItemDetail?itemId=[ID]`
+- Requests include required WAF headers:
+  - `Authority: buyerapi.shopgoodwill.com`
   - `Origin: https://www.shopgoodwill.com`
   - `Referer: https://www.shopgoodwill.com/`
   - `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`
+
+## Precision behavior
+
+- Clock sync is performed from the ShopGoodwill API `Date` header.
+- Bid fire target is **exactly 2.5 seconds** before auction end time.

@@ -18,6 +18,10 @@ function formatCountdown(endTimeMs) {
   return `${minutes}:${seconds}.${millis}`;
 }
 
+function formatEndTime(endTimeMs) {
+  return new Date(endTimeMs).toLocaleString();
+}
+
 function statusBadge(status) {
   const key = String(status || '').toLowerCase();
   if (key === 'unconfirmed') return '<span class="px-2 py-1 rounded text-xs font-semibold bg-amber-900 text-amber-300">UNCONFIRMED</span>';
@@ -89,10 +93,11 @@ function renderBattleMap() {
         <td class="py-2">
           <input data-max-item-id="${t.itemId}" value="${t.maxBid ?? ''}" ${t.status === 'ended' ? 'disabled' : ''} class="maxBidInput w-28 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs" placeholder="max" />
         </td>
+        <td class="py-2 text-xs text-slate-300">${formatEndTime(t.endTimeMs)}</td>
         <td class="py-2 font-mono">${formatCountdown(t.endTimeMs)}</td>
         <td class="py-2">${statusBadge(t.status)}</td>
         <td class="py-2">
-          <button data-lock-item-id="${t.itemId}" ${t.status === 'ended' ? 'disabled' : ''} class="lockBtn px-3 py-1.5 rounded font-semibold text-xs bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-slate-700">Lock Snipe</button>
+          <button data-lock-item-id="${t.itemId}" ${t.status === 'ended' ? 'disabled' : ''} class="lockBtn px-3 py-1.5 rounded font-semibold text-xs bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-slate-700">LOCK SNIPE</button>
         </td>
       </tr>`
     )

@@ -10,7 +10,7 @@ export class ShopGoodwillClient {
   }
 
   async login(username: string, password: string): Promise<string> {
-    const res = await request(this.endpoint('Login/ValidateUser'), {
+    const res = await request(this.endpoint('SignIn/Login'), {
       method: 'POST',
       dispatcher: this.dispatcher,
       headers: this.baseHeaders(),
@@ -18,7 +18,7 @@ export class ShopGoodwillClient {
     });
     const body = (await res.body.json()) as LoginResponse;
     if (res.statusCode >= 400 || body.isSuccess === false) throw new Error(body.message ?? `status ${res.statusCode}`);
-    const token = body.token ?? body.jwt;
+    const token = body.token ?? body.jwt ?? (body.data && typeof body.data === 'object' ? String((body.data as Record<string, unknown>).token ?? '') : '');
     if (!token) throw new Error('Missing token in login response');
     return token;
   }
@@ -83,11 +83,10 @@ export class ShopGoodwillClient {
 
   async getItemDetail(itemId: number, token?: string): Promise<Record<string, unknown>> {
     const headers = token ? this.authHeaders(token) : this.baseHeaders();
-    const res = await request(this.endpoint('Auction/GetItemDetail'), {
-      method: 'POST',
+    const res = await request(this.endpoint(`Auction/GetItemDetail?itemId=${itemId}`), {
+      method: 'GET',
       dispatcher: this.dispatcher,
-      headers,
-      body: JSON.stringify({ itemId })
+      headers
     });
 
     const body = (await res.body.json()) as ItemDetailResponse;
