@@ -26,9 +26,17 @@
       <section class="lg:col-span-3 space-y-4">
         <header class="bg-slate-900 border border-slate-800 rounded-lg p-4">
           <h1 class="text-xl font-bold">PROJECT GOODWILL-HUNTING</h1>
-          <p class="text-slate-400 text-sm">API-only Sovereign Engine · Liquid Truth telemetry.</p>
+          <p class="text-slate-400 text-sm">API-only Sovereign Engine · Query → Set Max → Confirm.</p>
           <p id="latencyInfo" class="text-xs text-amber-300 mt-2"></p>
         </header>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <h3 class="font-semibold mb-2">Query Item</h3>
+          <div class="flex gap-2">
+            <input id="itemQuery" class="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2" placeholder="Enter Item ID or ShopGoodwill URL" />
+            <button id="queryItem" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded font-semibold">Query</button>
+          </div>
+        </div>
 
         <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
           <h3 class="font-semibold mb-3">Live Heartbeats</h3>
@@ -36,25 +44,20 @@
         </div>
 
         <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <h3 class="font-semibold mb-2">Quick-Snipe</h3>
-          <div class="flex gap-2">
-            <input id="itemUrl" class="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2" placeholder="Paste item URL with item/seller id" />
-            <button id="addWatch" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded">Track</button>
-          </div>
-        </div>
-
-        <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
           <h3 class="font-semibold mb-3">Battle Map</h3>
           <div class="overflow-auto">
-            <table class="w-full text-sm min-w-[980px]">
+            <table class="w-full text-sm min-w-[1120px]">
               <thead class="text-slate-400 border-b border-slate-800">
                 <tr>
                   <th class="text-left py-2">Item ID</th>
                   <th class="text-left py-2">Account</th>
                   <th class="text-left py-2">Assign</th>
-                  <th class="text-left py-2">Current Price</th>
+                  <th class="text-left py-2">Current Bid</th>
+                  <th class="text-left py-2">Max Bid</th>
+                  <th class="text-left py-2">End Time</th>
                   <th class="text-left py-2">Countdown</th>
                   <th class="text-left py-2">Status</th>
+                  <th class="text-left py-2">Lock</th>
                 </tr>
               </thead>
               <tbody id="battleMap"></tbody>
