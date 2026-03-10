@@ -17,9 +17,9 @@ export function loadConfig(): AppConfig {
     userAgent:
       process.env.SGW_UA ??
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-    favoritesPollMs: 30_000,
-    tokenRefreshMs: 15 * 60_000,
-    fireLeadMs: 2_500,
+    favoritesPollMs: 60_000,
+    tokenRefreshMs: 20 * 60_000,
+    fireLeadMs: 2_800,
     port: Number(process.env.PORT ?? 3000),
     accountsPath: process.env.ACCOUNTS_PATH ?? 'accounts.json'
   };

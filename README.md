@@ -1,32 +1,59 @@
 # Project GoodWillHunting
 
-High-performance, multi-account, API-injection Sovereign Engine for ShopGoodwill.
+A high-performance, multi-account, API-only ShopGoodwill Sovereign Sniper Engine.
 
-## The Logos (Backend Engine)
+## THE DJED PILLAR (Setup)
 
-- **Headless Node.js only** (no Puppeteer, Playwright, or Selenium).
-- **Networking:** `undici` HTTP/1.1 for direct API traffic, including `/api/Auction/PlaceBid`.
-- **Server-time sync:** startup offset computed from the ShopGoodwill `Date` header using a HEAD request.
-- **Precision execution:** `process.hrtime()` nanosecond final-spin with worker-thread `Atomics.wait` support in final 5s.
-- **Berkland window:** pre-warm at **T-10s**, fire proxy bid at **T-2.5s**.
+1. Install **Node.js 20+**.
+2. Install project dependencies:
 
-## Multi-Account Sovereignty
+```bash
+npm install
+```
 
-- `accounts.json` stores account credentials.
-- `sessions.json` stores JWT snapshots for all accounts.
-- Token pool checks/refreshes every **15 minutes**, with JWT expiry-aware refresh logic.
-- If outbid, alternate connected accounts in the token pool can counter-fire immediately.
+## THE RITUAL (Running)
 
-## Note Syncing & Snipe Rules
+1. Create an `accounts.json` file in the project root (or copy from `accounts.example.json`) with your ShopGoodwill accounts:
 
-- Favorites sync runs every **30 seconds**.
-- Notes parser expects JSON like: `{"max": 150.00, "step": 1.00}`.
-- `max` defines cap, `step` defines increment for retries/counter-bids.
-- First fire randomizes cents (e.g., `$50.37`) to avoid round-number proxy walls.
+```json
+[
+  {
+    "id": "AccountA",
+    "username": "your-username",
+    "password": "your-password"
+  }
+]
+```
 
-## Maat Dashboard
+2. Start the server:
 
-- Dark-mode Tailwind single-page dashboard.
-- Real-time Battle Map: Item ID, Account, assignment override, current price, countdown(ms), status.
-- WebSocket Maa Kheru stream format:
-  - `[ITEM ID] | [ACCOUNT] | [STATUS]`
+```bash
+npm run dev
+```
+
+3. Open the dashboard at:
+
+```text
+http://localhost:3000
+```
+
+## THE COMMAND (Usage)
+
+Use the official ShopGoodwill website to heart/favorite items. Then, in the favorite item's **Notes** field, place JSON like:
+
+```json
+{"max": 100.00}
+```
+
+The engine syncs Favorites every 60 seconds. Any favorite with a valid `{"max": ...}` note becomes a LIVE target automatically and is queued for snipe timing.
+
+## Engine Behavior (Logos)
+
+- Headless Node.js runtime (API-only, no browser automation libs).
+- `undici` HTTP/1.1 client for direct buyer API communication.
+- `sessions.json` stores multi-account JWT snapshots.
+- Token auto-refresh checks run every 20 minutes.
+- Startup server-time offset sync via ShopGoodwill API `Date` header.
+- Snipe flow:
+  - Pre-warm at **T-10s**
+  - Fire proxy bid at **T-2.8s**
