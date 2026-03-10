@@ -18,6 +18,17 @@ function formatCountdown(endTimeMs) {
   return `${minutes}:${seconds}.${millis}`;
 }
 
+function statusBadge(status) {
+  const key = String(status || '').toLowerCase();
+  if (key === 'unconfirmed') return '<span class="px-2 py-1 rounded text-xs font-semibold bg-amber-900 text-amber-300">UNCONFIRMED</span>';
+  if (key === 'confirmed') return '<span class="px-2 py-1 rounded text-xs font-semibold bg-emerald-900 text-emerald-300">CONFIRMED</span>';
+  if (key === 'ended') return '<span class="px-2 py-1 rounded text-xs font-semibold bg-rose-900 text-rose-300">ENDED</span>';
+  if (key === 'win') return '<span class="px-2 py-1 rounded text-xs font-semibold bg-emerald-700 text-emerald-100">WIN</span>';
+  if (key === 'failed') return '<span class="px-2 py-1 rounded text-xs font-semibold bg-rose-800 text-rose-200">FAILED</span>';
+  if (key === 'sniping') return '<span class="px-2 py-1 rounded text-xs font-semibold bg-indigo-900 text-indigo-300">SNIPING</span>';
+  return `<span class="px-2 py-1 rounded text-xs font-semibold bg-slate-700 text-slate-200">${status}</span>`;
+}
+
 function renderHeartbeats() {
   heartbeatsNode.innerHTML = accounts
     .map(
@@ -68,15 +79,21 @@ function renderBattleMap() {
     .map(
       (t) => `<tr class="border-b border-slate-800">
         <td class="py-2 font-mono">#${t.itemId}</td>
-        <td class="py-2">${t.accountId}</td>
+        <td class="py-2">${t.accountId || 'AUTO'}</td>
         <td class="py-2">
           <select data-item-id="${t.itemId}" class="assignSelect bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs">
             ${assignmentOptions(t.itemId)}
           </select>
         </td>
         <td class="py-2">$${Number(t.currentPrice || 0).toFixed(2)}</td>
+        <td class="py-2">
+          <input data-max-item-id="${t.itemId}" value="${t.maxBid ?? ''}" ${t.status === 'ended' ? 'disabled' : ''} class="maxBidInput w-28 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs" placeholder="max" />
+        </td>
         <td class="py-2 font-mono">${formatCountdown(t.endTimeMs)}</td>
-        <td class="py-2">${t.status}</td>
+        <td class="py-2">${statusBadge(t.status)}</td>
+        <td class="py-2">
+          <button data-lock-item-id="${t.itemId}" ${t.status === 'ended' ? 'disabled' : ''} class="lockBtn px-3 py-1.5 rounded font-semibold text-xs bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-slate-700">Lock & Confirm</button>
+        </td>
       </tr>`
     )
     .join('');
@@ -93,12 +110,31 @@ function renderBattleMap() {
       assignments[itemId] = accountId;
     };
   });
+
+  document.querySelectorAll('.lockBtn').forEach((btn) => {
+    btn.onclick = async () => {
+      const itemId = Number(btn.dataset.lockItemId);
+      const maxInput = document.querySelector(`[data-max-item-id="${itemId}"]`);
+      const maxBid = Number(maxInput?.value);
+      const res = await fetch('/api/confirm', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ itemId, maxBid })
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        alert(data.message || 'Could not confirm item');
+        return;
+      }
+      await loadInitial();
+    };
+  });
 }
 
 function render() {
   renderBattleMap();
 }
-setInterval(render, 80);
+setInterval(render, 120);
 
 async function loadInitial() {
   const res = await fetch('/api/state');
@@ -110,15 +146,19 @@ async function loadInitial() {
   renderAccounts();
 }
 
-document.getElementById('addWatch').onclick = async () => {
-  const url = document.getElementById('itemUrl').value;
-  const res = await fetch('/api/watch', {
+document.getElementById('queryItem').onclick = async () => {
+  const query = document.getElementById('itemQuery').value.trim();
+  const res = await fetch('/api/query', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ url })
+    body: JSON.stringify({ query })
   });
   const data = await res.json();
-  if (!data.ok) alert(data.message || 'Failed to add watch');
+  if (!data.ok) {
+    alert(data.message || 'Failed to query item');
+    return;
+  }
+  await loadInitial();
 };
 
 document.getElementById('refreshAccounts').onclick = async () => {
