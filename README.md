@@ -1,46 +1,32 @@
 # Project GoodWillHunting
 
-High-performance, multi-account, API-only Sovereign Engine for ShopGoodwill.
+High-performance, multi-account, API-injection Sovereign Engine for ShopGoodwill.
 
-## Core Engine (Logos)
+## The Logos (Backend Engine)
 
-- **Headless Node.js runtime** with no Puppeteer/Playwright/Selenium usage.
-- **Networking:** `undici` HTTP/1.1 client for direct buyer API communication.
-- **Clock sync on startup:** server-time offset derived from ShopGoodwill API response headers.
-- **Snipe cadence:**
-  - Pre-warm connection at **T-10s**.
-  - Fire `/api/Auction/PlaceBid` at **T-2.5s** (with bounded latency adjustment).
-- **Final window timing:** uses a worker-thread + `Atomics.wait` strategy in final 5 seconds.
+- **Headless Node.js only** (no Puppeteer, Playwright, or Selenium).
+- **Networking:** `undici` HTTP/1.1 for direct API traffic, including `/api/Auction/PlaceBid`.
+- **Server-time sync:** startup offset computed from the ShopGoodwill `Date` header using a HEAD request.
+- **Precision execution:** `process.hrtime()` nanosecond final-spin with worker-thread `Atomics.wait` support in final 5s.
+- **Berkland window:** pre-warm at **T-10s**, fire proxy bid at **T-2.5s**.
 
 ## Multi-Account Sovereignty
 
-- **accounts.json** supports multi-account credentials.
-- **sessions.json** persists account JWT snapshots.
-- **Token Manager:** checks validity and refreshes silently every **15 minutes**.
-- **Auction pooling:** UI supports assigning specific item IDs to specific accounts.
+- `accounts.json` stores account credentials.
+- `sessions.json` stores JWT snapshots for all accounts.
+- Token pool checks/refreshes every **15 minutes**, with JWT expiry-aware refresh logic.
+- If outbid, alternate connected accounts in the token pool can counter-fire immediately.
 
-## The Maat Dashboard
+## Note Syncing & Snipe Rules
 
-- Single-page Tailwind dashboard served by local Express server.
-- Live account heartbeat cards (online/offline).
-- Real-time Battle Map table:
-  - Item ID
-  - Account
-  - Assigned Account override
-  - Current Price
-  - Countdown (ms)
-- Note-sync every 60s from Favorites: if Notes contain `{"max": 100.00}`, item becomes a LIVE target.
+- Favorites sync runs every **30 seconds**.
+- Notes parser expects JSON like: `{"max": 150.00, "step": 1.00}`.
+- `max` defines cap, `step` defines increment for retries/counter-bids.
+- First fire randomizes cents (e.g., `$50.37`) to avoid round-number proxy walls.
 
-## Performance Tuning
+## Maat Dashboard
 
-- Uses `isProxy: true` in bid payload.
-- Randomizes bid cents for first fire (e.g. `$50.37`) while respecting max cap.
-- On “Bid too low”, retries once at `+1.00` if still `<= max`.
-
-## Run
-
-```bash
-cp accounts.example.json accounts.json
-npm install
-npm run dev
-```
+- Dark-mode Tailwind single-page dashboard.
+- Real-time Battle Map: Item ID, Account, assignment override, current price, countdown(ms), status.
+- WebSocket Maa Kheru stream format:
+  - `[ITEM ID] | [ACCOUNT] | [STATUS]`

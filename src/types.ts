@@ -56,6 +56,7 @@ export interface BattleRow {
   imageUrl: string;
   currentPrice: number;
   maxBid: number | null;
+  stepBid: number;
   endTimeMs: number;
   status: string;
   lastBid?: number;

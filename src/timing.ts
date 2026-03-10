@@ -10,7 +10,8 @@ export async function preciseCountdown(targetEpochMs: number): Promise<void> {
       continue;
     }
 
-    await atomicsWaitUntil(targetEpochMs);
+    await atomicsWaitUntil(targetEpochMs - 2);
+    await hrtimeFinalSpin(targetEpochMs);
     return;
   }
 }
@@ -41,6 +42,18 @@ async function atomicsWaitUntil(targetEpochMs: number): Promise<void> {
     });
     worker.once('error', reject);
   });
+}
+
+async function hrtimeFinalSpin(targetEpochMs: number): Promise<void> {
+  const startEpochNs = BigInt(Date.now()) * 1_000_000n;
+  const startHrNs = process.hrtime.bigint();
+  const targetNs = BigInt(targetEpochMs) * 1_000_000n;
+
+  while (true) {
+    const nowNs = startEpochNs + (process.hrtime.bigint() - startHrNs);
+    if (nowNs >= targetNs) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
 }
 
 function sleep(ms: number): Promise<void> {

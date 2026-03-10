@@ -32,18 +32,15 @@ export class SniperEngine {
   addDirectItem(itemId: number, sellerId: number): void {
     if (Number.isFinite(itemId) && Number.isFinite(sellerId)) {
       this.directInput.set(itemId, { itemId, sellerId });
-      this.onUpdate({ type: 'alert', payload: { message: `Direct target queued: Item ${itemId} / Seller ${sellerId}` } });
+      this.emitMaaKheru(itemId, 'SYSTEM', 'QUEUED');
     }
   }
 
   setAssignment(itemId: number, accountId: string): void {
     if (!Number.isFinite(itemId)) return;
-    if (!accountId) {
-      this.assignments.delete(itemId);
-    } else {
-      this.assignments.set(itemId, accountId);
-    }
-    this.onUpdate({ type: 'alert', payload: { message: `Assignment updated: Item ${itemId} -> ${accountId || 'auto'}` } });
+    if (!accountId) this.assignments.delete(itemId);
+    else this.assignments.set(itemId, accountId);
+    this.emitMaaKheru(itemId, accountId || 'AUTO', 'QUEUED');
   }
 
   snapshot(): BattleRow[] {
@@ -93,10 +90,12 @@ export class SniperEngine {
 
     const noteText = String(fav.notes ?? fav.Notes ?? '').trim();
     let maxBid: number | null = null;
+    let stepBid = 1;
     if (noteText.startsWith('{')) {
       try {
-        const parsed = JSON.parse(noteText) as { max?: number };
+        const parsed = JSON.parse(noteText) as { max?: number; step?: number };
         if (typeof parsed.max === 'number' && parsed.max > 0) maxBid = parsed.max;
+        if (typeof parsed.step === 'number' && parsed.step > 0) stepBid = parsed.step;
       } catch {
         maxBid = null;
       }
@@ -117,6 +116,7 @@ export class SniperEngine {
       imageUrl: String(fav.imageUrl ?? fav.imageURL ?? ''),
       currentPrice: Number(fav.currentPrice ?? 0),
       maxBid,
+      stepBid,
       endTimeMs: endTimeMs + this.clockOffsetMs,
       status
     };
@@ -127,19 +127,16 @@ export class SniperEngine {
 
     try {
       this.updateStatus(key, 'QUEUED');
-
       const warmAt = row.endTimeMs - 10_000;
       const fireAt = row.endTimeMs - (this.config.fireLeadMs + this.triggerAdjustMs);
 
-      if (warmAt > Date.now()) {
-        await sleep(warmAt - Date.now());
-      }
-      this.updateStatus(key, 'PRE-WARM');
+      if (warmAt > Date.now()) await sleep(warmAt - Date.now());
+      this.updateStatus(key, 'SNIPING');
       await this.client.warmBidConnection(session.token);
 
       await preciseCountdown(fireAt);
 
-      const firstAmount = jitterBid(Math.max(row.maxBid - 1, 1), row.maxBid);
+      const firstAmount = jitterBid(Math.max(row.maxBid - row.stepBid, 1), row.maxBid);
       const first = await this.client.placeBid(session.token, {
         itemId: row.itemId,
         sellerId: row.sellerId,
@@ -149,39 +146,67 @@ export class SniperEngine {
       });
 
       if (first.isSuccess) {
-        this.updateStatus(key, 'SNIPE SUCCESS', firstAmount);
-        this.onUpdate({ type: 'alert', payload: { message: `[${session.id}] | WIN | Item #${row.itemId} | $${firstAmount.toFixed(2)}` } });
+        this.updateStatus(key, 'WIN', firstAmount);
+        this.emitMaaKheru(row.itemId, session.id, 'WIN');
         return;
       }
 
-      if (!/bid too low/i.test(first.message ?? '')) {
-        this.updateStatus(key, `FAILED: ${first.message ?? 'unknown'}`, firstAmount);
+      if (!/bid too low/i.test(first.message ?? '') || Date.now() >= row.endTimeMs) {
+        this.updateStatus(key, 'FAILED', firstAmount);
+        this.emitMaaKheru(row.itemId, session.id, 'FAILED');
         return;
       }
 
-      const retryAmount = Number((firstAmount + 1).toFixed(2));
-      if (retryAmount > row.maxBid) {
-        this.updateStatus(key, 'FAILED: BID TOO LOW / ABOVE MAX', firstAmount);
-        return;
+      const retryAmount = Number((firstAmount + row.stepBid).toFixed(2));
+      if (retryAmount <= row.maxBid) {
+        const retry = await this.client.placeBid(session.token, {
+          itemId: row.itemId,
+          sellerId: row.sellerId,
+          bidAmount: retryAmount,
+          bidType: 1,
+          isProxy: true
+        });
+        if (retry.isSuccess) {
+          this.updateStatus(key, 'WIN', retryAmount);
+          this.emitMaaKheru(row.itemId, session.id, 'WIN');
+          return;
+        }
       }
 
-      const retry = await this.client.placeBid(session.token, {
-        itemId: row.itemId,
-        sellerId: row.sellerId,
-        bidAmount: retryAmount,
-        bidType: 1,
-        isProxy: true
-      });
-
-      if (retry.isSuccess) {
-        this.updateStatus(key, 'SNIPE SUCCESS (RETRY)', retryAmount);
-        this.onUpdate({ type: 'alert', payload: { message: `[${session.id}] | WIN | Item #${row.itemId} | $${retryAmount.toFixed(2)}` } });
-      } else {
-        this.updateStatus(key, `FAILED: ${retry.message ?? 'unknown'}`, retryAmount);
-      }
+      // token pooling failover: immediate alternate-account counter fire
+      await this.counterFireWithPool(row, session.id, retryAmount > row.maxBid ? row.maxBid : retryAmount);
+      this.updateStatus(key, 'FAILED', retryAmount);
     } catch (error) {
       this.updateStatus(key, `ERROR: ${(error as Error).message}`);
     }
+  }
+
+  private async counterFireWithPool(row: BattleRow, primaryAccountId: string, amount: number): Promise<void> {
+    if (Date.now() >= row.endTimeMs) return;
+
+    const eligible = this.sessions.filter((s) => s.connected && s.token && s.id !== primaryAccountId);
+    const attempts = eligible.map((s) =>
+      this.client
+        .placeBid(s.token, {
+          itemId: row.itemId,
+          sellerId: row.sellerId,
+          bidAmount: amount,
+          bidType: 1,
+          isProxy: true
+        })
+        .then((result) => ({ session: s, result }))
+    );
+
+    if (attempts.length === 0) return;
+
+    const winner = await Promise.race(attempts);
+    if (winner.result.isSuccess) {
+      this.emitMaaKheru(row.itemId, winner.session.id, 'WIN');
+    }
+  }
+
+  private emitMaaKheru(itemId: number, accountId: string, status: string): void {
+    this.onUpdate({ type: 'alert', payload: { message: `[${itemId}] | [${accountId}] | [${status}]` } });
   }
 
   private updateStatus(key: string, status: string, lastBid?: number): void {
@@ -205,8 +230,6 @@ function jitterBid(base: number, max: number): number {
   const floor = Math.floor(base);
   const cents = 1 + Math.floor(Math.random() * 98);
   const candidate = Number((floor + cents / 100).toFixed(2));
-  if (candidate > max) {
-    return Number(Math.min(max, base).toFixed(2));
-  }
+  if (candidate > max) return Number(Math.min(max, base).toFixed(2));
   return candidate;
 }

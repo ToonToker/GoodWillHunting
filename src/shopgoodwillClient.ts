@@ -26,7 +26,7 @@ export class ShopGoodwillClient {
   async getServerTimeOffsetMs(): Promise<number> {
     const start = Date.now();
     const res = await request(`${this.config.baseUrl}/api`, {
-      method: 'GET',
+      method: 'HEAD',
       dispatcher: this.dispatcher,
       headers: this.baseHeaders()
     });
