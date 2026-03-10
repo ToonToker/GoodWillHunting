@@ -1,6 +1,6 @@
 import { Agent, request } from 'undici';
 import type { AppConfig } from './config.js';
-import type { BidPayload, FavoriteItem, FavoriteResponse, ItemDetailResponse, LoginResponse, PlaceBidResult } from './types.js';
+import type { BidPayload, FavoriteItem, FavoriteResponse, LoginResponse, PlaceBidResult } from './types.js';
 
 export class ShopGoodwillClient {
   private readonly dispatcher: Agent;
@@ -79,23 +79,6 @@ export class ShopGoodwillClient {
     } catch {
       return;
     }
-  }
-
-  async getItemDetail(itemId: number, token?: string): Promise<Record<string, unknown>> {
-    const headers = token ? this.authHeaders(token) : this.baseHeaders();
-    const res = await request(this.endpoint('Auction/GetItemDetail'), {
-      method: 'POST',
-      dispatcher: this.dispatcher,
-      headers,
-      body: JSON.stringify({ itemId })
-    });
-
-    const body = (await res.body.json()) as ItemDetailResponse;
-    if (res.statusCode >= 400) throw new Error(body.message ?? `item detail status ${res.statusCode}`);
-
-    const item = body.data ?? body.item;
-    if (!item) throw new Error('Item detail response missing data payload');
-    return item;
   }
 
   async placeBid(token: string, payload: BidPayload): Promise<PlaceBidResult> {
