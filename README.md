@@ -8,13 +8,19 @@ A high-performance, multi-account, API-only sniper dashboard for ShopGoodwill.
 2. Install required packages:
 
 ```bash
-npm install undici express dotenv ws
+npm install
 ```
 
 3. Install project dependencies/lockfile:
 
 ```bash
-npm install
+cp accounts.example.json accounts.json
+```
+
+4. Start the app:
+
+```bash
+npm run dev
 ```
 
 4. Create account file:
