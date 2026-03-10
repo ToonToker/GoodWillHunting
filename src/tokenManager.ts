@@ -52,7 +52,7 @@ function shouldRefresh(token: string): boolean {
   if (!token) return true;
   const expMs = decodeJwtExpMs(token);
   if (!expMs) return true;
-  return expMs - Date.now() < 10 * 60_000;
+  return expMs <= Date.now();
 }
 
 function decodeJwtExpMs(token: string): number | null {

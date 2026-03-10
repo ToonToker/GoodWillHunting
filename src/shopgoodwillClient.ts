@@ -10,7 +10,7 @@ export class ShopGoodwillClient {
   }
 
   async login(username: string, password: string): Promise<string> {
-    const res = await request(`${this.config.baseUrl}/api/Login/ValidateUser`, {
+    const res = await request(this.endpoint('Login/ValidateUser'), {
       method: 'POST',
       dispatcher: this.dispatcher,
       headers: this.baseHeaders(),
@@ -25,7 +25,7 @@ export class ShopGoodwillClient {
 
   async getServerTimeOffsetMs(): Promise<number> {
     const start = Date.now();
-    const res = await request(`${this.config.baseUrl}/api`, {
+    const res = await request(this.config.apiBaseUrl, {
       method: 'HEAD',
       dispatcher: this.dispatcher,
       headers: this.baseHeaders()
@@ -44,8 +44,8 @@ export class ShopGoodwillClient {
     for (let i = 0; i < sampleCount; i += 1) {
       const start = process.hrtime.bigint();
       try {
-        await request(`${this.config.baseUrl}/api`, {
-          method: 'GET',
+        await request(this.config.apiBaseUrl, {
+          method: 'HEAD',
           dispatcher: this.dispatcher,
           headers: this.baseHeaders()
         });
@@ -59,7 +59,7 @@ export class ShopGoodwillClient {
   }
 
   async getFavorites(token: string): Promise<FavoriteItem[]> {
-    const res = await request(`${this.config.baseUrl}/api/Member/GetFavoriteItems`, {
+    const res = await request(this.endpoint('Member/GetFavoriteItems'), {
       method: 'GET',
       dispatcher: this.dispatcher,
       headers: this.authHeaders(token)
@@ -71,7 +71,7 @@ export class ShopGoodwillClient {
 
   async warmBidConnection(token: string): Promise<void> {
     try {
-      await request(`${this.config.baseUrl}/api/Auction/PlaceBid`, {
+      await request(this.endpoint('Auction/PlaceBid'), {
         method: 'OPTIONS',
         dispatcher: this.dispatcher,
         headers: this.authHeaders(token)
@@ -82,7 +82,7 @@ export class ShopGoodwillClient {
   }
 
   async placeBid(token: string, payload: BidPayload): Promise<PlaceBidResult> {
-    const res = await request(`${this.config.baseUrl}/api/Auction/PlaceBid`, {
+    const res = await request(this.endpoint('Auction/PlaceBid'), {
       method: 'POST',
       dispatcher: this.dispatcher,
       headers: this.authHeaders(token),
@@ -93,13 +93,18 @@ export class ShopGoodwillClient {
     return body;
   }
 
+  private endpoint(path: string): string {
+    return new URL(path, this.config.apiBaseUrl).toString();
+  }
+
   private baseHeaders(): Record<string, string> {
     return {
+      authority: 'buyerapi.shopgoodwill.com',
       'content-type': 'application/json',
       accept: 'application/json',
-      'user-agent': this.config.userAgent,
-      origin: 'https://shopgoodwill.com',
-      referer: 'https://shopgoodwill.com/'
+      origin: 'https://www.shopgoodwill.com',
+      referer: 'https://www.shopgoodwill.com/',
+      'user-agent': this.config.userAgent
     };
   }
 

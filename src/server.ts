@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
 import { createServer } from 'node:http';
 import { mkdir } from 'node:fs/promises';

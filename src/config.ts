@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import type { AccountCredential } from './types.js';
 
 export interface AppConfig {
-  baseUrl: string;
+  apiBaseUrl: string;
   userAgent: string;
   favoritesPollMs: number;
   tokenRefreshMs: number;
@@ -13,13 +13,13 @@ export interface AppConfig {
 
 export function loadConfig(): AppConfig {
   return {
-    baseUrl: process.env.SGW_BASE_URL ?? 'https://buyerapi.shopgoodwill.com',
+    apiBaseUrl: process.env.SGW_API_BASE_URL ?? 'https://buyerapi.shopgoodwill.com/api/',
     userAgent:
       process.env.SGW_UA ??
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     favoritesPollMs: 60_000,
     tokenRefreshMs: 20 * 60_000,
-    fireLeadMs: 2_800,
+    fireLeadMs: 2_500,
     port: Number(process.env.PORT ?? 3000),
     accountsPath: process.env.ACCOUNTS_PATH ?? 'accounts.json'
   };

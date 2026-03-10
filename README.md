@@ -1,19 +1,25 @@
 # Project GoodWillHunting
 
-A high-performance, multi-account, API-only ShopGoodwill Sovereign Sniper Engine.
+A high-performance, multi-account, API-ONLY Sovereign Sniper Engine for ShopGoodwill.
 
-## THE DJED PILLAR (Setup)
+## SETUP
 
 1. Install **Node.js 20+**.
-2. Install project dependencies:
+2. Install dependencies (explicit command requested):
+
+```bash
+npm install undici express dotenv ws
+```
+
+3. Then install project dev/runtime lock set:
 
 ```bash
 npm install
 ```
 
-## THE RITUAL (Running)
+## ACCOUNTS
 
-1. Create an `accounts.json` file in the project root (or copy from `accounts.example.json`) with your ShopGoodwill accounts:
+Create `accounts.json` in the project root:
 
 ```json
 [
@@ -21,39 +27,51 @@ npm install
     "id": "AccountA",
     "username": "your-username",
     "password": "your-password"
+  },
+  {
+    "id": "AccountB",
+    "username": "your-second-username",
+    "password": "your-second-password"
   }
 ]
 ```
 
-2. Start the server:
+The engine stores active JWT snapshots in `sessions.json` and re-authenticates only when token expiry is detected.
 
-```bash
-npm run dev
-```
+## THE COMMAND
 
-3. Open the dashboard at:
+On the official ShopGoodwill site:
 
-```text
-http://localhost:3000
-```
-
-## THE COMMAND (Usage)
-
-Use the official ShopGoodwill website to heart/favorite items. Then, in the favorite item's **Notes** field, place JSON like:
+1. Heart/favorite the item.
+2. Open the Favorite **Notes** field.
+3. Enter JSON like:
 
 ```json
 {"max": 100.00}
 ```
 
-The engine syncs Favorites every 60 seconds. Any favorite with a valid `{"max": ...}` note becomes a LIVE target automatically and is queued for snipe timing.
+Optional stepped note format:
 
-## Engine Behavior (Logos)
+```json
+{"max": 150.00, "step": 1.00}
+```
 
-- Headless Node.js runtime (API-only, no browser automation libs).
-- `undici` HTTP/1.1 client for direct buyer API communication.
-- `sessions.json` stores multi-account JWT snapshots.
-- Token auto-refresh checks run every 20 minutes.
-- Startup server-time offset sync via ShopGoodwill API `Date` header.
-- Snipe flow:
-  - Pre-warm at **T-10s**
-  - Fire proxy bid at **T-2.8s**
+Favorites are synced every 60 seconds. Any favorite with valid `max` note JSON becomes a LIVE target and is queued automatically.
+
+## PRECISION ADVISORY
+
+Operate the script with stable network and system load during the **Berkland Window** (final ~3 seconds):
+
+- Startup clock offset is synced from ShopGoodwill API `Date` header.
+- TLS/API pre-warm occurs at **T-10s**.
+- Proxy bid is fired at **T-2.5s**.
+- Final execution path uses `Atomics.wait` + `process.hrtime()` nanosecond spin to minimize drift.
+
+## Quick Start
+
+```bash
+cp accounts.example.json accounts.json
+npm run dev
+```
+
+Open `http://localhost:3000`.

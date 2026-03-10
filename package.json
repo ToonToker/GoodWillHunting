@@ -13,7 +13,8 @@
   "dependencies": {
     "express": "^4.21.2",
     "undici": "^7.16.0",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "dotenv": "^16.4.7"
   },
   "devDependencies": {
     "@types/express": "^5.0.1",
