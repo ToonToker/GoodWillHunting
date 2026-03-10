@@ -1,0 +1,23 @@
+{
+  "name": "horus-snipe",
+  "version": "0.1.0",
+  "description": "API-first ShopGoodwill auction sniper with high precision scheduling.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "node-schedule": "^2.1.1",
+    "undici": "^7.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.14",
+    "@types/node-schedule": "^2.1.7",
+    "tsx": "^4.20.5",
+    "typescript": "^5.8.2"
+  }
+}
