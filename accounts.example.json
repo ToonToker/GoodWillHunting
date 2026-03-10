@@ -1,12 +1,7 @@
 [
   {
-    "id": "AccountA",
+    "id": "Primary",
     "username": "email-or-username",
-    "password": "password"
-  },
-  {
-    "id": "AccountB",
-    "username": "second-account",
     "password": "password"
   }
 ]

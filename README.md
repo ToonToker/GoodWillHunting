@@ -1,26 +1,35 @@
-# Project Horus-Dashboard
+# Project Horus-Dashboard-Omega
 
-High-performance ShopGoodwill sniper with a Tailwind dark-mode dashboard + Node.js backend.
+High-performance, multi-account ShopGoodwill Sovereign Sniper with a dark-mode Mission Control GUI.
 
-## Features
+## Omega Architecture
 
-- **Account Console** for multi-account session status and manual token refresh.
-- **Battle Map** live snipe table with real-time countdowns via WebSocket pushes.
-- **Direct Input** accepts an item URL and adds that item to watch flow.
-- **Favorites Sync** every 60s for all accounts; uses Notes JSON `{"max_bid":123.45}` as target max bid.
-- **Snipe timings**:
-  - prewarm bid connection at **T-10s**
-  - place bid at **T-2.8s**
-  - retry once at `+1` on `Bid too low` if still `<= max_bid`
-- **Precision**: final 5-second countdown uses `process.hrtime.bigint()` loop.
-- **API payload** includes `itemId`, `sellerId`, `bidAmount`, and `bidType`.
-- **Token storage** writes JWT snapshots to local `sessions.json`.
+- **Backend Core:** Node.js + Express + WebSocket, API-only execution.
+- **Transport:** `undici` HTTP/1.1 Agent for low-latency buyer API calls.
+- **Multi-Account Vault:** `sessions.json` stores and rotates JWT sessions for all accounts.
+- **Favorite Sync:** every 60s, pulls Favorites per account and auto-queues targets when Notes contain JSON max bids:
+  - `{"max": 75}`
+  - `{"max_bid": 75}`
+- **Berkland Trigger:**
+  - Pre-warm at **T-10s**
+  - Fire at **T-2.8s** adjusted by startup latency audit (+/-100ms)
+  - Final 5-second precision loop uses `process.hrtime()`
+- **Retry-on-low-bid:** if response indicates bid too low, retries once at `+1` while still `<= max`.
+
+## Mission Control GUI (Tailwind)
+
+- **Account Console (sidebar):** add/remove accounts + live green/red connection status.
+- **Battle Map table:**
+  - Item Photo
+  - Item ID
+  - Account Assigned
+  - Current Price
+  - Your Max
+  - Countdown (ms precision)
+- **Quick-Snipe:** paste URL to parse Item ID + Seller ID and instantly queue watch.
+- **Maa Kheru Stream:** WebSocket event feed with success/failure updates.
 
 ## Setup
-
-1. Copy `accounts.example.json` to `accounts.json` and add credentials.
-2. Install dependencies.
-3. Run server.
 
 ```bash
 cp accounts.example.json accounts.json
@@ -28,14 +37,15 @@ npm install
 npm run dev
 ```
 
-Open: `http://localhost:3000`
+Open `http://localhost:3000`.
 
-## Environment Variables
+## Environment
 
 - `PORT` (default `3000`)
 - `SGW_BASE_URL` (default `https://buyerapi.shopgoodwill.com`)
-- `SGW_UA` (custom browser user-agent)
+- `SGW_UA` (User-Agent override)
+- `ACCOUNTS_PATH` (default `accounts.json`)
 
-## Note on workflow
+## Pro Tip
 
-The dashboard is designed so you can **heart** items on the official site, set your `max_bid` note there, and let Favorites sync automatically discover and arm targets.
+You can simply heart items on ShopGoodwill and write your max bid in Favorites Notes. Omega auto-detects those entries on sync and arms snipes automatically.

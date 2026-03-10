@@ -10,6 +10,8 @@ export interface AccountSession {
   password: string;
   token: string;
   refreshedAt: number;
+  connected: boolean;
+  lastError?: string;
 }
 
 export interface LoginResponse {
@@ -29,6 +31,8 @@ export interface FavoriteItem {
   notes?: string;
   Notes?: string;
   title?: string;
+  imageUrl?: string;
+  imageURL?: string;
   currentPrice?: number;
   minimumBid?: number;
 }
@@ -49,6 +53,8 @@ export interface LiveTarget {
   itemId: number;
   sellerId: number;
   title: string;
+  imageUrl: string;
+  currentPrice: number;
   maxBid: number;
   endTimeMs: number;
   status: string;
@@ -65,4 +71,9 @@ export interface BidPayload {
 export interface SessionStore {
   updatedAt: string;
   sessions: Array<{ id: string; token: string; refreshedAt: number }>;
+}
+
+export interface DirectWatch {
+  itemId: number;
+  sellerId: number;
 }

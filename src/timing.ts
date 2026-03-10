@@ -42,13 +42,17 @@ export async function preciseCountdown(targetEpochMs: number): Promise<void> {
       continue;
     }
 
-    const startMs = Date.now();
-    const startHr = process.hrtime.bigint();
-    const targetNs = BigInt(targetEpochMs - startMs) * 1_000_000n;
-    while (process.hrtime.bigint() - startHr < targetNs) {
+    const hrStart = process.hrtime();
+    const epochStart = Date.now();
+
+    while (true) {
+      const elapsed = process.hrtime(hrStart);
+      const elapsedMs = elapsed[0] * 1000 + elapsed[1] / 1_000_000;
+      if (epochStart + elapsedMs >= targetEpochMs) {
+        return;
+      }
       await new Promise((resolve) => setImmediate(resolve));
     }
-    return;
   }
 }
 

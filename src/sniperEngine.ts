@@ -1,8 +1,8 @@
 import type { AppConfig } from './config.js';
-import { logError, logInfo } from './logger.js';
+import { logError } from './logger.js';
 import { ShopGoodwillClient } from './shopgoodwillClient.js';
 import { preciseCountdown } from './timing.js';
-import type { AccountSession, FavoriteItem, LiveTarget } from './types.js';
+import type { AccountSession, DirectWatch, FavoriteItem, LiveTarget } from './types.js';
 
 interface UpdateEvent {
   type: 'state' | 'alert';
@@ -12,13 +12,14 @@ interface UpdateEvent {
 export class SniperEngine {
   private readonly targets = new Map<string, LiveTarget>();
   private readonly active = new Set<string>();
-  private readonly directInput = new Set<number>();
+  private readonly directInput = new Map<number, DirectWatch>();
 
   constructor(
     private readonly client: ShopGoodwillClient,
     private readonly config: AppConfig,
     private readonly sessions: AccountSession[],
     private readonly clockOffsetMs: number,
+    private readonly triggerAdjustMs: number,
     private readonly onUpdate: (event: UpdateEvent) => void
   ) {}
 
@@ -28,17 +29,15 @@ export class SniperEngine {
     setInterval(() => void this.refreshTokens(), this.config.tokenRefreshMs).unref();
   }
 
-  addDirectItem(itemId: number): void {
-    if (Number.isFinite(itemId)) {
-      this.directInput.add(itemId);
-      this.onUpdate({ type: 'alert', payload: { message: `Direct input queued for item ${itemId}` } });
+  addDirectItem(itemId: number, sellerId: number): void {
+    if (Number.isFinite(itemId) && Number.isFinite(sellerId)) {
+      this.directInput.set(itemId, { itemId, sellerId });
+      this.onUpdate({ type: 'alert', payload: { message: `Direct target queued: Item ${itemId} / Seller ${sellerId}` } });
     }
   }
 
   snapshot(): LiveTarget[] {
-    return Array.from(this.targets.values())
-      .sort((a, b) => a.endTimeMs - b.endTimeMs)
-      .map((t) => ({ ...t, endTimeMs: t.endTimeMs + this.clockOffsetMs }));
+    return Array.from(this.targets.values()).sort((a, b) => a.endTimeMs - b.endTimeMs);
   }
 
   private async refreshTokens(): Promise<void> {
@@ -47,11 +46,16 @@ export class SniperEngine {
         try {
           s.token = await this.client.login(s.username, s.password);
           s.refreshedAt = Date.now();
+          s.connected = true;
+          s.lastError = undefined;
         } catch (error) {
+          s.connected = false;
+          s.lastError = (error as Error).message;
           logError(`token refresh ${s.id}: ${(error as Error).message}`);
         }
       })
     );
+    this.broadcastState();
   }
 
   private async pollFavorites(): Promise<void> {
@@ -62,25 +66,32 @@ export class SniperEngine {
   private async pollForAccount(session: AccountSession): Promise<void> {
     try {
       const favorites = await this.client.getFavorites(session.token);
+      session.connected = true;
+      session.lastError = undefined;
+
       for (const fav of favorites) {
         const target = this.toTarget(session.id, fav);
         if (!target) continue;
 
         const key = `${session.id}:${target.itemId}`;
-        this.targets.set(key, target);
+        const existing = this.targets.get(key);
+        this.targets.set(key, existing ? { ...existing, ...target } : target);
+
         if (!this.active.has(key)) {
           this.active.add(key);
           void this.snipe(session, target, key).finally(() => this.active.delete(key));
         }
       }
     } catch (error) {
+      session.connected = false;
+      session.lastError = (error as Error).message;
       logError(`favorites ${session.id}: ${(error as Error).message}`);
     }
   }
 
   private toTarget(accountId: string, fav: FavoriteItem): LiveTarget | null {
     const itemId = Number(fav.itemId ?? fav.ItemId);
-    const sellerId = Number(fav.sellerId ?? fav.SellerID ?? 0);
+    const sellerIdFromFav = Number(fav.sellerId ?? fav.SellerID ?? 0);
     const endTimeMs = Date.parse(String(fav.endTime ?? fav.EndTime ?? ''));
     if (!Number.isFinite(itemId) || !Number.isFinite(endTimeMs) || endTimeMs <= Date.now() + this.clockOffsetMs) {
       return null;
@@ -90,24 +101,30 @@ export class SniperEngine {
     let maxBid: number | null = null;
     if (noteText.startsWith('{')) {
       try {
-        const parsed = JSON.parse(noteText) as { max_bid?: number };
+        const parsed = JSON.parse(noteText) as { max?: number; max_bid?: number };
+        if (typeof parsed.max === 'number' && parsed.max > 0) maxBid = parsed.max;
         if (typeof parsed.max_bid === 'number' && parsed.max_bid > 0) maxBid = parsed.max_bid;
       } catch {
         return null;
       }
     }
 
-    if (maxBid === null && this.directInput.has(itemId)) {
+    const direct = this.directInput.get(itemId);
+    const sellerId = direct?.sellerId || sellerIdFromFav;
+
+    if (maxBid === null && direct) {
       maxBid = Number(fav.minimumBid ?? fav.currentPrice ?? 1);
     }
 
-    if (maxBid === null) return null;
+    if (maxBid === null || !Number.isFinite(sellerId) || sellerId <= 0) return null;
 
     return {
       accountId,
       itemId,
       sellerId,
       title: fav.title ?? `Item ${itemId}`,
+      imageUrl: String(fav.imageUrl ?? fav.imageURL ?? ''),
+      currentPrice: Number(fav.currentPrice ?? 0),
       maxBid,
       endTimeMs,
       status: 'TRACKING'
@@ -117,13 +134,14 @@ export class SniperEngine {
   private async snipe(session: AccountSession, target: LiveTarget, key: string): Promise<void> {
     try {
       this.updateStatus(key, 'QUEUED');
+
       const warmAt = target.endTimeMs - 10_000 - this.clockOffsetMs;
-      const fireAt = target.endTimeMs - 2_800 - this.clockOffsetMs;
+      const fireAt = target.endTimeMs - (this.config.fireLeadMs + this.triggerAdjustMs) - this.clockOffsetMs;
 
       if (warmAt > Date.now()) {
         await sleep(warmAt - Date.now());
       }
-      this.updateStatus(key, 'WARMED');
+      this.updateStatus(key, 'PRE-WARM');
       await this.client.warmBidConnection(session.token);
 
       await preciseCountdown(fireAt);
@@ -138,10 +156,7 @@ export class SniperEngine {
 
       if (first.isSuccess) {
         this.updateStatus(key, 'SNIPE SUCCESS', firstAmount);
-        this.onUpdate({
-          type: 'alert',
-          payload: { message: `[${session.id}] | WIN | Item #${target.itemId} | $${firstAmount.toFixed(2)}` }
-        });
+        this.onUpdate({ type: 'alert', payload: { message: `[${session.id}] | WIN | Item #${target.itemId} | $${firstAmount.toFixed(2)}` } });
         return;
       }
 
@@ -152,7 +167,7 @@ export class SniperEngine {
 
       const retryAmount = firstAmount + 1;
       if (retryAmount > target.maxBid) {
-        this.updateStatus(key, 'FAILED: low bid, above max', firstAmount);
+        this.updateStatus(key, 'FAILED: BID TOO LOW / ABOVE MAX', firstAmount);
         return;
       }
 
@@ -165,10 +180,7 @@ export class SniperEngine {
 
       if (retry.isSuccess) {
         this.updateStatus(key, 'SNIPE SUCCESS (RETRY)', retryAmount);
-        this.onUpdate({
-          type: 'alert',
-          payload: { message: `[${session.id}] | WIN | Item #${target.itemId} | $${retryAmount.toFixed(2)}` }
-        });
+        this.onUpdate({ type: 'alert', payload: { message: `[${session.id}] | WIN | Item #${target.itemId} | $${retryAmount.toFixed(2)}` } });
       } else {
         this.updateStatus(key, `FAILED: ${retry.message ?? 'unknown'}`, retryAmount);
       }

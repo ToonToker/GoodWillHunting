@@ -6,7 +6,7 @@ export class ShopGoodwillClient {
   private readonly dispatcher: Agent;
 
   constructor(private readonly config: AppConfig) {
-    this.dispatcher = new Agent({ connections: 120, keepAliveTimeout: 30_000, keepAliveMaxTimeout: 120_000, pipelining: 1 });
+    this.dispatcher = new Agent({ connections: 150, keepAliveTimeout: 30_000, keepAliveMaxTimeout: 120_000, pipelining: 1 });
   }
 
   async login(username: string, password: string): Promise<string> {
@@ -21,6 +21,25 @@ export class ShopGoodwillClient {
     const token = body.token ?? body.jwt;
     if (!token) throw new Error('Missing token in login response');
     return token;
+  }
+
+  async measureApiRtt(sampleCount = 5): Promise<number> {
+    const samples: number[] = [];
+    for (let i = 0; i < sampleCount; i += 1) {
+      const start = process.hrtime.bigint();
+      try {
+        await request(`${this.config.baseUrl}/api`, {
+          method: 'GET',
+          dispatcher: this.dispatcher,
+          headers: this.baseHeaders()
+        });
+      } catch {
+        // Even 401/404/network edge still provides transport RTT value when reachable.
+      }
+      const elapsedNs = process.hrtime.bigint() - start;
+      samples.push(Number(elapsedNs / 1_000_000n));
+    }
+    return samples.reduce((a, b) => a + b, 0) / Math.max(samples.length, 1);
   }
 
   async getFavorites(token: string): Promise<FavoriteItem[]> {

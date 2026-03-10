@@ -3,60 +3,67 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Horus Dashboard</title>
+    <title>Horus Dashboard Omega</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = { darkMode: 'class' };
     </script>
   </head>
   <body class="bg-slate-950 text-slate-100 min-h-screen">
-    <main class="max-w-6xl mx-auto p-6 space-y-6">
-      <header>
-        <h1 class="text-2xl font-bold">PROJECT HORUS-DASHBOARD</h1>
-        <p class="text-slate-400">Liquid Truth sniper control surface.</p>
-      </header>
+    <div class="max-w-7xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <aside class="lg:col-span-1 bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-4">
+        <h2 class="font-semibold">Account Console</h2>
+        <form id="addAccountForm" class="space-y-2">
+          <input id="accId" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1" placeholder="ID" />
+          <input id="accUser" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1" placeholder="Username" />
+          <input id="accPass" type="password" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1" placeholder="Password" />
+          <button class="w-full bg-indigo-600 hover:bg-indigo-500 rounded py-1.5">Add Account</button>
+        </form>
+        <button id="refreshAccounts" class="w-full bg-slate-700 hover:bg-slate-600 rounded py-1.5">Refresh Tokens</button>
+        <ul id="accounts" class="space-y-2 text-sm"></ul>
+      </aside>
 
-      <section class="bg-slate-900 border border-slate-800 rounded-lg p-4">
-        <h2 class="font-semibold mb-2">Account Console</h2>
-        <div class="flex gap-3 items-center mb-3">
-          <button id="refreshAccounts" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 rounded">Refresh Tokens</button>
-          <span id="accountStatus" class="text-sm text-slate-400"></span>
+      <section class="lg:col-span-3 space-y-4">
+        <header class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <h1 class="text-xl font-bold">Mission Control · Horus Dashboard Omega</h1>
+          <p class="text-slate-400 text-sm">Dark-mode sovereign sniper UI. Liquid Truth, zero bloat.</p>
+          <p id="latencyInfo" class="text-xs text-amber-300 mt-2"></p>
+        </header>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <h3 class="font-semibold mb-2">Quick-Snipe</h3>
+          <div class="flex gap-2">
+            <input id="itemUrl" class="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2" placeholder="Paste item URL with item/seller id" />
+            <button id="addWatch" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded">Track</button>
+          </div>
         </div>
-        <ul id="accounts" class="text-sm text-slate-300 space-y-1"></ul>
-      </section>
 
-      <section class="bg-slate-900 border border-slate-800 rounded-lg p-4">
-        <h2 class="font-semibold mb-2">Direct Input</h2>
-        <div class="flex gap-2">
-          <input id="itemUrl" class="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2" placeholder="Paste ShopGoodwill item URL" />
-          <button id="addWatch" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded">Track</button>
+        <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <h3 class="font-semibold mb-3">Battle Map</h3>
+          <div class="overflow-auto">
+            <table class="w-full text-sm min-w-[900px]">
+              <thead class="text-slate-400 border-b border-slate-800">
+                <tr>
+                  <th class="text-left py-2">Item Photo</th>
+                  <th class="text-left py-2">Item ID</th>
+                  <th class="text-left py-2">Account Assigned</th>
+                  <th class="text-left py-2">Current Price</th>
+                  <th class="text-left py-2">Your Max</th>
+                  <th class="text-left py-2">Countdown</th>
+                  <th class="text-left py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody id="battleMap"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <h3 class="font-semibold mb-2">Maa Kheru Stream</h3>
+          <ul id="alerts" class="space-y-1 text-sm"></ul>
         </div>
       </section>
-
-      <section class="bg-slate-900 border border-slate-800 rounded-lg p-4">
-        <h2 class="font-semibold mb-3">Battle Map</h2>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="text-slate-400 border-b border-slate-800">
-              <tr>
-                <th class="text-left py-2">Account</th>
-                <th class="text-left py-2">Item</th>
-                <th class="text-left py-2">Title</th>
-                <th class="text-left py-2">Max Bid</th>
-                <th class="text-left py-2">Countdown</th>
-                <th class="text-left py-2">Status</th>
-              </tr>
-            </thead>
-            <tbody id="battleMap"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="bg-slate-900 border border-slate-800 rounded-lg p-4">
-        <h2 class="font-semibold mb-2">Alerts</h2>
-        <ul id="alerts" class="text-sm space-y-1"></ul>
-      </section>
-    </main>
+    </div>
 
     <script type="module" src="/app.js"></script>
   </body>

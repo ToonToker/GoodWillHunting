@@ -1,9 +1,10 @@
 const battleMap = document.getElementById('battleMap');
 const accountsNode = document.getElementById('accounts');
 const alertsNode = document.getElementById('alerts');
-const accountStatus = document.getElementById('accountStatus');
+const latencyInfo = document.getElementById('latencyInfo');
 
 let targets = [];
+let accounts = [];
 
 function formatCountdown(endTimeMs) {
   const ms = endTimeMs - Date.now();
@@ -15,30 +16,58 @@ function formatCountdown(endTimeMs) {
   return `${minutes}:${seconds}.${millis}`;
 }
 
-function render() {
+function renderAccounts() {
+  accountsNode.innerHTML = accounts
+    .map(
+      (a) => `<li class="bg-slate-800 border border-slate-700 rounded p-2 flex items-center justify-between gap-2">
+        <div>
+          <div class="font-medium">${a.id}</div>
+          <div class="text-xs text-slate-400">${a.username}</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full ${a.connected ? 'bg-emerald-500' : 'bg-rose-500'}"></span>
+          <button data-id="${a.id}" class="removeAccount text-xs bg-rose-600 hover:bg-rose-500 px-2 py-1 rounded">Remove</button>
+        </div>
+      </li>`
+    )
+    .join('');
+
+  document.querySelectorAll('.removeAccount').forEach((btn) => {
+    btn.onclick = async () => {
+      await fetch(`/api/accounts/${btn.dataset.id}`, { method: 'DELETE' });
+      await loadInitial();
+    };
+  });
+}
+
+function renderBattleMap() {
   battleMap.innerHTML = targets
     .map(
       (t) => `<tr class="border-b border-slate-800">
+        <td class="py-2"><img src="${t.imageUrl || 'https://via.placeholder.com/56x56?text=SGW'}" class="w-14 h-14 rounded object-cover border border-slate-700"/></td>
+        <td class="py-2 font-mono">#${t.itemId}</td>
         <td class="py-2">${t.accountId}</td>
-        <td class="py-2">#${t.itemId}</td>
-        <td class="py-2">${t.title}</td>
+        <td class="py-2">$${Number(t.currentPrice || 0).toFixed(2)}</td>
         <td class="py-2">$${Number(t.maxBid).toFixed(2)}</td>
-        <td class="py-2">${formatCountdown(t.endTimeMs)}</td>
+        <td class="py-2 font-mono">${formatCountdown(t.endTimeMs)}</td>
         <td class="py-2">${t.status}</td>
       </tr>`
     )
     .join('');
 }
 
-setInterval(render, 100);
+function render() {
+  renderBattleMap();
+}
+setInterval(render, 80);
 
 async function loadInitial() {
   const res = await fetch('/api/state');
   const data = await res.json();
   targets = data.targets ?? [];
-  accountsNode.innerHTML = (data.accounts ?? [])
-    .map((a) => `<li>${a.id} <span class="text-slate-500">(token: ${new Date(a.refreshedAt).toLocaleTimeString()})</span></li>`)
-    .join('');
+  accounts = data.accounts ?? [];
+  latencyInfo.textContent = `Latency audit RTT: ${Number(data.avgRttMs ?? 0).toFixed(1)}ms | Trigger adjust: ${data.triggerAdjustMs ?? 0}ms`;
+  renderAccounts();
 }
 
 document.getElementById('addWatch').onclick = async () => {
@@ -53,9 +82,27 @@ document.getElementById('addWatch').onclick = async () => {
 };
 
 document.getElementById('refreshAccounts').onclick = async () => {
-  accountStatus.textContent = 'Refreshing...';
   await fetch('/api/accounts/refresh', { method: 'POST' });
-  accountStatus.textContent = 'Tokens refreshed';
+  await loadInitial();
+};
+
+document.getElementById('addAccountForm').onsubmit = async (event) => {
+  event.preventDefault();
+  const id = document.getElementById('accId').value.trim();
+  const username = document.getElementById('accUser').value.trim();
+  const password = document.getElementById('accPass').value;
+  const res = await fetch('/api/accounts', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id, username, password })
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    alert(data.message || 'Failed to add account');
+    return;
+  }
+  event.target.reset();
+  await loadInitial();
 };
 
 const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
