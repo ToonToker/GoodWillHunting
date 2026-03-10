@@ -1,188 +1,188 @@
 import schedule from 'node-schedule';
-import { logError, logInfo, logStatus, logWarn } from './logger.js';
-import { ShopGoodwillClient } from './shopgoodwillClient.js';
+import PQueue from 'p-queue';
 import type { AppConfig } from './config.js';
-import type { FavoriteItem, LiveTarget, TrackedAuction } from './types.js';
+import { logError, logInfo, logSnipeResult } from './logger.js';
+import { ShopGoodwillClient } from './shopgoodwillClient.js';
+import { preciseWait } from './timing.js';
+import type { AccountSession, FavoriteItem, LiveTargetNote, PlaceBidResult, TrackedAuction } from './types.js';
 
 export class SniperEngine {
-  private readonly tracked = new Map<number, TrackedAuction>();
-  private readonly activeSnipes = new Set<number>();
+  private readonly tracked = new Map<string, TrackedAuction>();
+  private readonly queue: PQueue;
+  private readonly finalLogQueue: Array<() => void> = [];
 
   constructor(
     private readonly client: ShopGoodwillClient,
-    private readonly config: AppConfig
-  ) {}
-
-  async start(): Promise<void> {
-    await this.pollFavorites();
-    this.scheduleNextPoll();
-    logInfo('Watcher initialized: polling favorites every 60 seconds.');
+    private readonly config: AppConfig,
+    private readonly sessions: AccountSession[],
+    private readonly clockOffsetMs: number
+  ) {
+    this.queue = new PQueue({ concurrency: config.maxConcurrentSnipes });
   }
 
-  private scheduleNextPoll(): void {
-    schedule.scheduleJob(new Date(Date.now() + this.config.pollIntervalMs), async () => {
-      await this.pollFavorites();
-      this.scheduleNextPoll();
+  async start(): Promise<void> {
+    await this.pollAllFavorites();
+
+    schedule.scheduleJob(new Date(Date.now() + this.config.pollIntervalMs), () => {
+      void this.pollAllFavorites().finally(() => this.schedulePollLoop());
+    });
+
+    this.scheduleTokenRefresh();
+    logInfo(`Sniper engine started for ${this.sessions.length} account(s).`);
+  }
+
+  private schedulePollLoop(): void {
+    schedule.scheduleJob(new Date(Date.now() + this.config.pollIntervalMs), () => {
+      void this.pollAllFavorites().finally(() => this.schedulePollLoop());
     });
   }
 
-  private async pollFavorites(): Promise<void> {
+  private scheduleTokenRefresh(): void {
+    setInterval(() => {
+      void Promise.all(this.sessions.map((s) => this.refreshToken(s)));
+    }, this.config.tokenRefreshMs).unref();
+  }
+
+  private async refreshToken(session: AccountSession): Promise<void> {
     try {
-      const favorites = await this.client.getFavorites();
-      this.ingestFavorites(favorites);
-      this.scheduleTargets();
+      session.token = await this.client.login(session.username, session.password);
+      session.tokenRefreshedAt = Date.now();
+      logInfo(`Refreshed token for ${session.accountId}.`);
     } catch (error) {
-      logError(`Polling failed: ${(error as Error).message}`);
+      logError(`Token refresh failed for ${session.accountId}: ${(error as Error).message}`);
     }
   }
 
-  private ingestFavorites(favorites: FavoriteItem[]): void {
-    const now = Date.now();
+  private async pollAllFavorites(): Promise<void> {
+    await Promise.all(this.sessions.map((s) => this.pollFavoritesForAccount(s)));
+  }
+
+  private async pollFavoritesForAccount(session: AccountSession): Promise<void> {
+    try {
+      const favorites = await this.client.getFavorites(session.token);
+      this.ingestFavorites(session, favorites);
+      this.queueTargets();
+    } catch (error) {
+      logError(`Favorites poll failed for ${session.accountId}: ${(error as Error).message}`);
+    }
+  }
+
+  private ingestFavorites(session: AccountSession, favorites: FavoriteItem[]): void {
+    const now = this.nowMs();
+
     for (const favorite of favorites) {
-      const raw = favorite as FavoriteItem & { Notes?: string; endTime?: string; itemId?: number | string };
-      const parsed = this.parseLiveTarget(raw.notes ?? raw.Notes ?? '');
-      if (!parsed) continue;
+      const itemId = Number(favorite.itemId ?? favorite.ItemId);
+      const endTimeMs = Date.parse(String(favorite.endTime ?? favorite.EndTime ?? ''));
+      const parsed = parseLiveNote(favorite.notes ?? favorite.Notes ?? '');
 
-      const endTimeMs = Date.parse(raw.endTime);
-      if (!Number.isFinite(endTimeMs) || endTimeMs <= now) continue;
-
-      const itemId = Number(raw.itemId);
-      if (!Number.isFinite(itemId)) continue;
-
-      this.tracked.set(itemId, {
-        itemId,
-        endTimeMs,
-        maxBid: parsed.max_bid,
-        currentPrice: Number(raw.currentPrice ?? 0),
-        title: raw.title ?? 'Unknown'
-      });
-
-      logStatus(itemId, parsed.max_bid, endTimeMs - now, 'LIVE TARGET');
-    }
-  }
-
-  private scheduleTargets(): void {
-    const now = Date.now();
-
-    for (const [itemId, auction] of this.tracked.entries()) {
-      if (auction.endTimeMs <= now) {
-        this.tracked.delete(itemId);
+      if (!Number.isFinite(itemId) || !Number.isFinite(endTimeMs) || !parsed || endTimeMs <= now) {
         continue;
       }
-      if (this.activeSnipes.has(itemId)) continue;
 
-      if (this.activeSnipes.size >= this.config.maxConcurrentSnipes) {
-        logWarn(`Concurrency limit reached (${this.config.maxConcurrentSnipes}). Holding auction ${itemId}.`);
-        break;
-      }
-
-      this.activeSnipes.add(itemId);
-      void this.runSnipe(auction)
-        .catch((error) => logError(`Snipe failed for ${itemId}: ${(error as Error).message}`))
-        .finally(() => {
-          this.activeSnipes.delete(itemId);
-          this.tracked.delete(itemId);
-        });
+      const key = `${session.accountId}:${itemId}`;
+      this.tracked.set(key, {
+        accountId: session.accountId,
+        itemId,
+        endTimeMs,
+        maxBid: parsed.max
+      });
     }
   }
 
-  private async runSnipe(auction: TrackedAuction): Promise<void> {
-    const warmupAt = auction.endTimeMs - 10_000;
-    const fireAt = auction.endTimeMs - 2_500;
+  private queueTargets(): void {
+    const useWorkerTimers = this.tracked.size > 50;
 
-    if (warmupAt > Date.now()) {
-      await delay(warmupAt - Date.now());
+    for (const [key, auction] of this.tracked.entries()) {
+      this.queue.add(async () => {
+        await this.runSnipe(auction, useWorkerTimers);
+      });
+      this.tracked.delete(key);
+    }
+  }
+
+  private async runSnipe(auction: TrackedAuction, useWorkerTimers: boolean): Promise<void> {
+    const session = this.sessions.find((s) => s.accountId === auction.accountId);
+    if (!session) return;
+
+    const warmAt = auction.endTimeMs - 10_000;
+    const fireAt = auction.endTimeMs - 2_800;
+
+    if (warmAt > this.nowMs()) {
+      await sleep(warmAt - this.nowMs());
     }
 
-    logStatus(auction.itemId, auction.maxBid, auction.endTimeMs - Date.now(), 'WARMING CONNECTION');
-    await this.client.warmBidConnection();
+    await this.client.warmBidConnection(session.token);
 
-    await preciseWait(fireAt);
+    await preciseWait(fireAt - this.clockOffsetMs, useWorkerTimers);
 
-    logStatus(auction.itemId, auction.maxBid, auction.endTimeMs - Date.now(), 'FIRING BID');
-    const first = await this.client.placeBid(auction.itemId, auction.maxBid);
+    const firstAmount = auction.maxBid > 1 ? auction.maxBid - 1 : auction.maxBid;
+    const first = await this.client.placeBid(session.token, auction.itemId, firstAmount);
+    const finalResult = await this.retryIfLowBid(session, auction, first, firstAmount);
+
+    this.deferFinalLog(auction.endTimeMs + 200, () => {
+      logSnipeResult(
+        auction.accountId,
+        finalResult.isSuccess ? 'WIN' : `FAIL:${finalResult.message ?? 'unknown'}`,
+        auction.itemId,
+        finalResult.amount
+      );
+    });
+  }
+
+  private async retryIfLowBid(
+    session: AccountSession,
+    auction: TrackedAuction,
+    first: PlaceBidResult,
+    firstAmount: number
+  ): Promise<{ isSuccess: boolean; message?: string; amount: number }> {
     if (first.isSuccess) {
-      logStatus(auction.itemId, auction.maxBid, auction.endTimeMs - Date.now(), 'SUCCESS');
-      return;
+      return { isSuccess: true, amount: firstAmount };
     }
 
-    const msg = first.message ?? '';
-    if (!/bid too low/i.test(msg)) {
-      logStatus(auction.itemId, auction.maxBid, auction.endTimeMs - Date.now(), `FAILED: ${msg}`);
-      return;
+    if (!/bid too low/i.test(first.message ?? '')) {
+      return { isSuccess: false, message: first.message, amount: firstAmount };
     }
 
-    const oneStepHigher = this.deriveCounterBid(msg, first.minimumNextBid, auction.maxBid);
-    if (oneStepHigher === null) {
-      logStatus(auction.itemId, auction.maxBid, auction.endTimeMs - Date.now(), 'LOW BID, OUT OF BUFFER');
-      return;
+    const retryAmount = firstAmount + 1;
+    if (retryAmount > auction.maxBid) {
+      return { isSuccess: false, message: 'Bid too low and above max', amount: firstAmount };
     }
 
-    logStatus(auction.itemId, oneStepHigher, auction.endTimeMs - Date.now(), 'RE-FIRE');
-    const second = await this.client.placeBid(auction.itemId, oneStepHigher);
-    logStatus(
-      auction.itemId,
-      oneStepHigher,
-      auction.endTimeMs - Date.now(),
-      second.isSuccess ? 'SUCCESS (RE-FIRE)' : `FAILED (RE-FIRE): ${second.message ?? 'unknown'}`
-    );
+    const retry = await this.client.placeBid(session.token, auction.itemId, retryAmount);
+    return {
+      isSuccess: retry.isSuccess,
+      message: retry.message,
+      amount: retryAmount
+    };
   }
 
-  private deriveCounterBid(message: string, minimumNextBid: number | undefined, maxBid: number): number | null {
-    const parsedFromMessage = Number((message.match(/(\d+(?:\.\d{1,2})?)/)?.[1] ?? NaN));
-    const floor = Number.isFinite(minimumNextBid ?? NaN)
-      ? Number(minimumNextBid)
-      : Number.isFinite(parsedFromMessage)
-        ? parsedFromMessage
-        : null;
-
-    if (floor === null || floor > maxBid) return null;
-    return floor;
+  private deferFinalLog(whenEpochMs: number, producer: () => void): void {
+    const delay = Math.max(whenEpochMs - this.nowMs(), 0);
+    setTimeout(() => {
+      this.finalLogQueue.push(producer);
+      const task = this.finalLogQueue.shift();
+      if (task) task();
+    }, delay).unref();
   }
 
-  private parseLiveTarget(notes: string): LiveTarget | null {
-    if (!notes.trim().startsWith('{')) return null;
+  private nowMs(): number {
+    return Date.now() + this.clockOffsetMs;
+  }
+}
 
-    try {
-      const parsed = JSON.parse(notes) as Partial<LiveTarget>;
-      if (typeof parsed.max_bid === 'number' && Number.isFinite(parsed.max_bid) && parsed.max_bid > 0) {
-        return { max_bid: parsed.max_bid };
-      }
-    } catch {
-      return null;
+function parseLiveNote(raw: string): LiveTargetNote | null {
+  if (!raw.trim().startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<LiveTargetNote>;
+    if (typeof parsed.max === 'number' && parsed.max > 0) {
+      return { max: parsed.max };
     }
-
+  } catch {
     return null;
   }
+  return null;
 }
 
-async function delay(ms: number): Promise<void> {
+function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function preciseWait(targetEpochMs: number): Promise<void> {
-  while (true) {
-    const remaining = targetEpochMs - Date.now();
-    if (remaining <= 0) return;
-
-    if (remaining > 40) {
-      await delay(remaining - 20);
-      continue;
-    }
-
-    const baseEpochNs = Date.now() * 1_000_000;
-    const hr = process.hrtime();
-    const baseHrNs = hr[0] * 1_000_000_000 + hr[1];
-    const targetNs = targetEpochMs * 1_000_000;
-
-    while (true) {
-      const nowHr = process.hrtime();
-      const nowHrNs = nowHr[0] * 1_000_000_000 + nowHr[1];
-      const elapsedNs = nowHrNs - baseHrNs;
-      if (baseEpochNs + elapsedNs >= targetNs) {
-        return;
-      }
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-  }
 }

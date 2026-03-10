@@ -4,32 +4,22 @@ import type { FavoriteItem, FavoriteResponse, LoginResponse, PlaceBidResult } fr
 
 export class ShopGoodwillClient {
   private readonly dispatcher: Agent;
-  private token: string | null = null;
 
   constructor(private readonly config: AppConfig) {
     this.dispatcher = new Agent({
-      keepAliveTimeout: 30_000,
-      keepAliveMaxTimeout: 120_000,
+      connections: 100,
       pipelining: 1,
-      connections: 25
+      keepAliveTimeout: 30_000,
+      keepAliveMaxTimeout: 120_000
     });
   }
 
-  setToken(token: string): void {
-    this.token = token;
-  }
-
-  getToken(): string | null {
-    return this.token;
-  }
-
   async login(username: string, password: string): Promise<string> {
-    const payload = { username, password };
     const res = await request(`${this.config.baseUrl}/api/Login/ValidateUser`, {
       method: 'POST',
       dispatcher: this.dispatcher,
       headers: this.baseHeaders(),
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ username, password })
     });
 
     const body = (await res.body.json()) as LoginResponse;
@@ -38,19 +28,15 @@ export class ShopGoodwillClient {
     }
 
     const token = body.token ?? body.jwt;
-    if (!token) {
-      throw new Error('Login response missing JWT token.');
-    }
-
-    this.token = token;
+    if (!token) throw new Error('Login response missing JWT token.');
     return token;
   }
 
-  async getFavorites(): Promise<FavoriteItem[]> {
+  async getFavorites(token: string): Promise<FavoriteItem[]> {
     const res = await request(`${this.config.baseUrl}/api/Member/GetFavoriteItems`, {
       method: 'GET',
       dispatcher: this.dispatcher,
-      headers: this.authHeaders()
+      headers: this.authHeaders(token)
     });
 
     const body = (await res.body.json()) as FavoriteResponse;
@@ -61,23 +47,23 @@ export class ShopGoodwillClient {
     return body.data ?? body.items ?? [];
   }
 
-  async warmBidConnection(): Promise<void> {
+  async warmBidConnection(token: string): Promise<void> {
     try {
       await request(`${this.config.baseUrl}/api/Auction/PlaceBid`, {
         method: 'OPTIONS',
         dispatcher: this.dispatcher,
-        headers: this.authHeaders()
+        headers: this.authHeaders(token)
       });
     } catch {
-      // Best effort: keep-alive handshake can fail depending on API CORS/server behavior.
+      // best effort
     }
   }
 
-  async placeBid(itemId: number, amount: number): Promise<PlaceBidResult> {
+  async placeBid(token: string, itemId: number, amount: number): Promise<PlaceBidResult> {
     const res = await request(`${this.config.baseUrl}/api/Auction/PlaceBid`, {
       method: 'POST',
       dispatcher: this.dispatcher,
-      headers: this.authHeaders(),
+      headers: this.authHeaders(token),
       body: JSON.stringify({ itemId, bidAmount: amount })
     });
 
@@ -99,14 +85,10 @@ export class ShopGoodwillClient {
     };
   }
 
-  private authHeaders(): Record<string, string> {
-    if (!this.token) {
-      throw new Error('JWT is not set. Login first.');
-    }
-
+  private authHeaders(token: string): Record<string, string> {
     return {
       ...this.baseHeaders(),
-      authorization: `Bearer ${this.token}`
+      authorization: `Bearer ${token}`
     };
   }
 }

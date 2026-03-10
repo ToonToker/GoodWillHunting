@@ -1,7 +1,7 @@
 {
-  "name": "horus-snipe",
-  "version": "0.1.0",
-  "description": "API-first ShopGoodwill auction sniper with high precision scheduling.",
+  "name": "horus-multi-snipe",
+  "version": "0.2.0",
+  "description": "Headless multi-account ShopGoodwill sniper with NTP-synced precision timing.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "node-schedule": "^2.1.1",
+    "p-queue": "^8.1.0",
     "undici": "^7.16.0"
   },
   "devDependencies": {

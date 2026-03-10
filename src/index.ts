@@ -1,26 +1,38 @@
-import { loadConfig } from './config.js';
-import { logError, logInfo } from './logger.js';
+import { loadAccounts, loadConfig } from './config.js';
+import { logError, logInfo, logWarn } from './logger.js';
 import { ShopGoodwillClient } from './shopgoodwillClient.js';
 import { SniperEngine } from './sniperEngine.js';
-import { TokenVault } from './tokenVault.js';
+import { getNtpOffsetMs } from './timing.js';
+import type { AccountSession } from './types.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const vault = new TokenVault();
+  const accounts = await loadAccounts();
   const client = new ShopGoodwillClient(config);
 
-  const existingToken = await vault.load();
-  if (existingToken) {
-    client.setToken(existingToken);
-    logInfo('Loaded JWT from secure vault.');
+  const clockOffsetMs = await getNtpOffsetMs();
+  if (clockOffsetMs === 0) {
+    logWarn('NTP sync unavailable; continuing with local system clock.');
   } else {
-    logInfo('No JWT found in vault; performing login anchor flow.');
-    const token = await client.login(config.username, config.password);
-    await vault.save(token);
-    logInfo('JWT acquired and stored in vault.');
+    logInfo(`NTP clock offset established: ${clockOffsetMs}ms.`);
   }
 
-  const engine = new SniperEngine(client, config);
+  const sessions: AccountSession[] = [];
+  await Promise.all(
+    accounts.map(async (account) => {
+      const token = await client.login(account.username, account.password);
+      sessions.push({
+        accountId: account.id,
+        username: account.username,
+        password: account.password,
+        token,
+        tokenRefreshedAt: Date.now()
+      });
+      logInfo(`Logged in ${account.id}.`);
+    })
+  );
+
+  const engine = new SniperEngine(client, config, sessions, clockOffsetMs);
   await engine.start();
 }
 

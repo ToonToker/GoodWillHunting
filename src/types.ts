@@ -1,3 +1,17 @@
+export interface AccountCredential {
+  id: string;
+  username: string;
+  password: string;
+}
+
+export interface AccountSession {
+  accountId: string;
+  username: string;
+  password: string;
+  token: string;
+  tokenRefreshedAt: number;
+}
+
 export interface LoginResponse {
   token?: string;
   jwt?: string;
@@ -6,12 +20,14 @@ export interface LoginResponse {
 }
 
 export interface FavoriteItem {
-  itemId: number;
-  title?: string;
+  itemId?: number | string;
+  ItemId?: number | string;
+  endTime?: string;
+  EndTime?: string;
   notes?: string;
-  endTime: string;
+  Notes?: string;
+  title?: string;
   currentPrice?: number;
-  minimumBid?: number;
 }
 
 export interface FavoriteResponse {
@@ -27,14 +43,13 @@ export interface PlaceBidResult {
   minimumNextBid?: number;
 }
 
-export interface LiveTarget {
-  max_bid: number;
+export interface LiveTargetNote {
+  max: number;
 }
 
 export interface TrackedAuction {
+  accountId: string;
   itemId: number;
   endTimeMs: number;
   maxBid: number;
-  currentPrice: number;
-  title: string;
 }
