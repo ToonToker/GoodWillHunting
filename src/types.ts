@@ -5,36 +5,37 @@ export interface AccountCredential {
 }
 
 export interface AccountSession {
-  accountId: string;
+  id: string;
   username: string;
   password: string;
   token: string;
-  tokenRefreshedAt: number;
+  refreshedAt: number;
 }
 
 export interface LoginResponse {
-  token?: string;
-  jwt?: string;
   isSuccess?: boolean;
   message?: string;
+  token?: string;
+  jwt?: string;
 }
 
 export interface FavoriteItem {
   itemId?: number | string;
   ItemId?: number | string;
+  sellerId?: number | string;
+  SellerID?: number | string;
   endTime?: string;
   EndTime?: string;
   notes?: string;
   Notes?: string;
   title?: string;
   currentPrice?: number;
+  minimumBid?: number;
 }
 
 export interface FavoriteResponse {
-  isSuccess?: boolean;
   data?: FavoriteItem[];
   items?: FavoriteItem[];
-  message?: string;
 }
 
 export interface PlaceBidResult {
@@ -43,13 +44,25 @@ export interface PlaceBidResult {
   minimumNextBid?: number;
 }
 
-export interface LiveTargetNote {
-  max: number;
-}
-
-export interface TrackedAuction {
+export interface LiveTarget {
   accountId: string;
   itemId: number;
-  endTimeMs: number;
+  sellerId: number;
+  title: string;
   maxBid: number;
+  endTimeMs: number;
+  status: string;
+  lastBid?: number;
+}
+
+export interface BidPayload {
+  itemId: number;
+  sellerId: number;
+  bidAmount: number;
+  bidType: 1;
+}
+
+export interface SessionStore {
+  updatedAt: string;
+  sessions: Array<{ id: string; token: string; refreshedAt: number }>;
 }

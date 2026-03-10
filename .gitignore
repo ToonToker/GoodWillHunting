@@ -1,5 +1,5 @@
 node_modules/
 dist/
-.secrets/
 *.log
 accounts.json
+sessions.json

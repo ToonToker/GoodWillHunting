@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Horus Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = { darkMode: 'class' };
+    </script>
+  </head>
+  <body class="bg-slate-950 text-slate-100 min-h-screen">
+    <main class="max-w-6xl mx-auto p-6 space-y-6">
+      <header>
+        <h1 class="text-2xl font-bold">PROJECT HORUS-DASHBOARD</h1>
+        <p class="text-slate-400">Liquid Truth sniper control surface.</p>
+      </header>
+
+      <section class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+        <h2 class="font-semibold mb-2">Account Console</h2>
+        <div class="flex gap-3 items-center mb-3">
+          <button id="refreshAccounts" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 rounded">Refresh Tokens</button>
+          <span id="accountStatus" class="text-sm text-slate-400"></span>
+        </div>
+        <ul id="accounts" class="text-sm text-slate-300 space-y-1"></ul>
+      </section>
+
+      <section class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+        <h2 class="font-semibold mb-2">Direct Input</h2>
+        <div class="flex gap-2">
+          <input id="itemUrl" class="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2" placeholder="Paste ShopGoodwill item URL" />
+          <button id="addWatch" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded">Track</button>
+        </div>
+      </section>
+
+      <section class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+        <h2 class="font-semibold mb-3">Battle Map</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="text-slate-400 border-b border-slate-800">
+              <tr>
+                <th class="text-left py-2">Account</th>
+                <th class="text-left py-2">Item</th>
+                <th class="text-left py-2">Title</th>
+                <th class="text-left py-2">Max Bid</th>
+                <th class="text-left py-2">Countdown</th>
+                <th class="text-left py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody id="battleMap"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+        <h2 class="font-semibold mb-2">Alerts</h2>
+        <ul id="alerts" class="text-sm space-y-1"></ul>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

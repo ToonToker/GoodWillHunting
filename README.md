@@ -1,47 +1,41 @@
-# Project Horus-Multi-Snipe
+# Project Horus-Dashboard
 
-Headless, API-first, multi-account ShopGoodwill sniper engine built in TypeScript.
+High-performance ShopGoodwill sniper with a Tailwind dark-mode dashboard + Node.js backend.
 
-## Mission Compliance
+## Features
 
-- **Engine:** Node.js headless runtime, no UI layers.
-- **Network:** `undici` Agent-based HTTP/1.1 calls.
-- **Concurrency:** `p-queue` for high-throughput snipe execution.
-- **Multi-account:** Reads `accounts.json`, logs in all accounts at startup.
-- **Token refresh:** Re-authenticates all sessions every 30 minutes.
-- **Dynamic targeting:** Favorites note JSON `{"max":100}` marks a live target.
-- **NTP sync:** Startup offset from `pool.ntp.org` for corrected timing.
-- **Execution windows:**
-  - pre-warm bid endpoint at **T-10s**,
-  - fire bid at **T-2.8s**,
-  - retry once (+$1) when bid is too low if still `<= max`.
-- **Final 5s OPSEC:** No countdown logs during the critical final 5-second window.
-- **High-load timing:** switches to worker-thread + `Atomics.wait` timing path when tracking >50 auctions.
+- **Account Console** for multi-account session status and manual token refresh.
+- **Battle Map** live snipe table with real-time countdowns via WebSocket pushes.
+- **Direct Input** accepts an item URL and adds that item to watch flow.
+- **Favorites Sync** every 60s for all accounts; uses Notes JSON `{"max_bid":123.45}` as target max bid.
+- **Snipe timings**:
+  - prewarm bid connection at **T-10s**
+  - place bid at **T-2.8s**
+  - retry once at `+1` on `Bid too low` if still `<= max_bid`
+- **Precision**: final 5-second countdown uses `process.hrtime.bigint()` loop.
+- **API payload** includes `itemId`, `sellerId`, `bidAmount`, and `bidType`.
+- **Token storage** writes JWT snapshots to local `sessions.json`.
 
-## Accounts
+## Setup
 
-Copy `accounts.example.json` to `accounts.json` and fill credentials:
-
-```json
-[
-  {
-    "id": "AccountA",
-    "username": "email-or-username",
-    "password": "password"
-  }
-]
-```
-
-## Run
+1. Copy `accounts.example.json` to `accounts.json` and add credentials.
+2. Install dependencies.
+3. Run server.
 
 ```bash
+cp accounts.example.json accounts.json
 npm install
 npm run dev
 ```
 
-Optional environment variables:
+Open: `http://localhost:3000`
 
+## Environment Variables
+
+- `PORT` (default `3000`)
 - `SGW_BASE_URL` (default `https://buyerapi.shopgoodwill.com`)
-- `SGW_UA` (default Chrome/Windows User-Agent)
-- `SGW_POLL_MS` (default `60000`)
-- `SGW_MAX_SNIPES` (default `80`)
+- `SGW_UA` (custom browser user-agent)
+
+## Note on workflow
+
+The dashboard is designed so you can **heart** items on the official site, set your `max_bid` note there, and let Favorites sync automatically discover and arm targets.

@@ -1,186 +1,193 @@
-import schedule from 'node-schedule';
-import PQueue from 'p-queue';
 import type { AppConfig } from './config.js';
-import { logError, logInfo, logSnipeResult } from './logger.js';
+import { logError, logInfo } from './logger.js';
 import { ShopGoodwillClient } from './shopgoodwillClient.js';
-import { preciseWait } from './timing.js';
-import type { AccountSession, FavoriteItem, LiveTargetNote, PlaceBidResult, TrackedAuction } from './types.js';
+import { preciseCountdown } from './timing.js';
+import type { AccountSession, FavoriteItem, LiveTarget } from './types.js';
+
+interface UpdateEvent {
+  type: 'state' | 'alert';
+  payload: unknown;
+}
 
 export class SniperEngine {
-  private readonly tracked = new Map<string, TrackedAuction>();
-  private readonly queue: PQueue;
-  private readonly finalLogQueue: Array<() => void> = [];
+  private readonly targets = new Map<string, LiveTarget>();
+  private readonly active = new Set<string>();
+  private readonly directInput = new Set<number>();
 
   constructor(
     private readonly client: ShopGoodwillClient,
     private readonly config: AppConfig,
     private readonly sessions: AccountSession[],
-    private readonly clockOffsetMs: number
-  ) {
-    this.queue = new PQueue({ concurrency: config.maxConcurrentSnipes });
+    private readonly clockOffsetMs: number,
+    private readonly onUpdate: (event: UpdateEvent) => void
+  ) {}
+
+  start(): void {
+    void this.pollFavorites();
+    setInterval(() => void this.pollFavorites(), this.config.favoritesPollMs).unref();
+    setInterval(() => void this.refreshTokens(), this.config.tokenRefreshMs).unref();
   }
 
-  async start(): Promise<void> {
-    await this.pollAllFavorites();
-
-    schedule.scheduleJob(new Date(Date.now() + this.config.pollIntervalMs), () => {
-      void this.pollAllFavorites().finally(() => this.schedulePollLoop());
-    });
-
-    this.scheduleTokenRefresh();
-    logInfo(`Sniper engine started for ${this.sessions.length} account(s).`);
-  }
-
-  private schedulePollLoop(): void {
-    schedule.scheduleJob(new Date(Date.now() + this.config.pollIntervalMs), () => {
-      void this.pollAllFavorites().finally(() => this.schedulePollLoop());
-    });
-  }
-
-  private scheduleTokenRefresh(): void {
-    setInterval(() => {
-      void Promise.all(this.sessions.map((s) => this.refreshToken(s)));
-    }, this.config.tokenRefreshMs).unref();
-  }
-
-  private async refreshToken(session: AccountSession): Promise<void> {
-    try {
-      session.token = await this.client.login(session.username, session.password);
-      session.tokenRefreshedAt = Date.now();
-      logInfo(`Refreshed token for ${session.accountId}.`);
-    } catch (error) {
-      logError(`Token refresh failed for ${session.accountId}: ${(error as Error).message}`);
+  addDirectItem(itemId: number): void {
+    if (Number.isFinite(itemId)) {
+      this.directInput.add(itemId);
+      this.onUpdate({ type: 'alert', payload: { message: `Direct input queued for item ${itemId}` } });
     }
   }
 
-  private async pollAllFavorites(): Promise<void> {
-    await Promise.all(this.sessions.map((s) => this.pollFavoritesForAccount(s)));
+  snapshot(): LiveTarget[] {
+    return Array.from(this.targets.values())
+      .sort((a, b) => a.endTimeMs - b.endTimeMs)
+      .map((t) => ({ ...t, endTimeMs: t.endTimeMs + this.clockOffsetMs }));
   }
 
-  private async pollFavoritesForAccount(session: AccountSession): Promise<void> {
+  private async refreshTokens(): Promise<void> {
+    await Promise.all(
+      this.sessions.map(async (s) => {
+        try {
+          s.token = await this.client.login(s.username, s.password);
+          s.refreshedAt = Date.now();
+        } catch (error) {
+          logError(`token refresh ${s.id}: ${(error as Error).message}`);
+        }
+      })
+    );
+  }
+
+  private async pollFavorites(): Promise<void> {
+    await Promise.all(this.sessions.map((s) => this.pollForAccount(s)));
+    this.broadcastState();
+  }
+
+  private async pollForAccount(session: AccountSession): Promise<void> {
     try {
       const favorites = await this.client.getFavorites(session.token);
-      this.ingestFavorites(session, favorites);
-      this.queueTargets();
-    } catch (error) {
-      logError(`Favorites poll failed for ${session.accountId}: ${(error as Error).message}`);
-    }
-  }
+      for (const fav of favorites) {
+        const target = this.toTarget(session.id, fav);
+        if (!target) continue;
 
-  private ingestFavorites(session: AccountSession, favorites: FavoriteItem[]): void {
-    const now = this.nowMs();
-
-    for (const favorite of favorites) {
-      const itemId = Number(favorite.itemId ?? favorite.ItemId);
-      const endTimeMs = Date.parse(String(favorite.endTime ?? favorite.EndTime ?? ''));
-      const parsed = parseLiveNote(favorite.notes ?? favorite.Notes ?? '');
-
-      if (!Number.isFinite(itemId) || !Number.isFinite(endTimeMs) || !parsed || endTimeMs <= now) {
-        continue;
+        const key = `${session.id}:${target.itemId}`;
+        this.targets.set(key, target);
+        if (!this.active.has(key)) {
+          this.active.add(key);
+          void this.snipe(session, target, key).finally(() => this.active.delete(key));
+        }
       }
-
-      const key = `${session.accountId}:${itemId}`;
-      this.tracked.set(key, {
-        accountId: session.accountId,
-        itemId,
-        endTimeMs,
-        maxBid: parsed.max
-      });
+    } catch (error) {
+      logError(`favorites ${session.id}: ${(error as Error).message}`);
     }
   }
 
-  private queueTargets(): void {
-    const useWorkerTimers = this.tracked.size > 50;
-
-    for (const [key, auction] of this.tracked.entries()) {
-      this.queue.add(async () => {
-        await this.runSnipe(auction, useWorkerTimers);
-      });
-      this.tracked.delete(key);
-    }
-  }
-
-  private async runSnipe(auction: TrackedAuction, useWorkerTimers: boolean): Promise<void> {
-    const session = this.sessions.find((s) => s.accountId === auction.accountId);
-    if (!session) return;
-
-    const warmAt = auction.endTimeMs - 10_000;
-    const fireAt = auction.endTimeMs - 2_800;
-
-    if (warmAt > this.nowMs()) {
-      await sleep(warmAt - this.nowMs());
+  private toTarget(accountId: string, fav: FavoriteItem): LiveTarget | null {
+    const itemId = Number(fav.itemId ?? fav.ItemId);
+    const sellerId = Number(fav.sellerId ?? fav.SellerID ?? 0);
+    const endTimeMs = Date.parse(String(fav.endTime ?? fav.EndTime ?? ''));
+    if (!Number.isFinite(itemId) || !Number.isFinite(endTimeMs) || endTimeMs <= Date.now() + this.clockOffsetMs) {
+      return null;
     }
 
-    await this.client.warmBidConnection(session.token);
-
-    await preciseWait(fireAt - this.clockOffsetMs, useWorkerTimers);
-
-    const firstAmount = auction.maxBid > 1 ? auction.maxBid - 1 : auction.maxBid;
-    const first = await this.client.placeBid(session.token, auction.itemId, firstAmount);
-    const finalResult = await this.retryIfLowBid(session, auction, first, firstAmount);
-
-    this.deferFinalLog(auction.endTimeMs + 200, () => {
-      logSnipeResult(
-        auction.accountId,
-        finalResult.isSuccess ? 'WIN' : `FAIL:${finalResult.message ?? 'unknown'}`,
-        auction.itemId,
-        finalResult.amount
-      );
-    });
-  }
-
-  private async retryIfLowBid(
-    session: AccountSession,
-    auction: TrackedAuction,
-    first: PlaceBidResult,
-    firstAmount: number
-  ): Promise<{ isSuccess: boolean; message?: string; amount: number }> {
-    if (first.isSuccess) {
-      return { isSuccess: true, amount: firstAmount };
+    const noteText = String(fav.notes ?? fav.Notes ?? '').trim();
+    let maxBid: number | null = null;
+    if (noteText.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(noteText) as { max_bid?: number };
+        if (typeof parsed.max_bid === 'number' && parsed.max_bid > 0) maxBid = parsed.max_bid;
+      } catch {
+        return null;
+      }
     }
 
-    if (!/bid too low/i.test(first.message ?? '')) {
-      return { isSuccess: false, message: first.message, amount: firstAmount };
+    if (maxBid === null && this.directInput.has(itemId)) {
+      maxBid = Number(fav.minimumBid ?? fav.currentPrice ?? 1);
     }
 
-    const retryAmount = firstAmount + 1;
-    if (retryAmount > auction.maxBid) {
-      return { isSuccess: false, message: 'Bid too low and above max', amount: firstAmount };
-    }
+    if (maxBid === null) return null;
 
-    const retry = await this.client.placeBid(session.token, auction.itemId, retryAmount);
     return {
-      isSuccess: retry.isSuccess,
-      message: retry.message,
-      amount: retryAmount
+      accountId,
+      itemId,
+      sellerId,
+      title: fav.title ?? `Item ${itemId}`,
+      maxBid,
+      endTimeMs,
+      status: 'TRACKING'
     };
   }
 
-  private deferFinalLog(whenEpochMs: number, producer: () => void): void {
-    const delay = Math.max(whenEpochMs - this.nowMs(), 0);
-    setTimeout(() => {
-      this.finalLogQueue.push(producer);
-      const task = this.finalLogQueue.shift();
-      if (task) task();
-    }, delay).unref();
-  }
+  private async snipe(session: AccountSession, target: LiveTarget, key: string): Promise<void> {
+    try {
+      this.updateStatus(key, 'QUEUED');
+      const warmAt = target.endTimeMs - 10_000 - this.clockOffsetMs;
+      const fireAt = target.endTimeMs - 2_800 - this.clockOffsetMs;
 
-  private nowMs(): number {
-    return Date.now() + this.clockOffsetMs;
-  }
-}
+      if (warmAt > Date.now()) {
+        await sleep(warmAt - Date.now());
+      }
+      this.updateStatus(key, 'WARMED');
+      await this.client.warmBidConnection(session.token);
 
-function parseLiveNote(raw: string): LiveTargetNote | null {
-  if (!raw.trim().startsWith('{')) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<LiveTargetNote>;
-    if (typeof parsed.max === 'number' && parsed.max > 0) {
-      return { max: parsed.max };
+      await preciseCountdown(fireAt);
+
+      const firstAmount = target.maxBid > 1 ? target.maxBid - 1 : target.maxBid;
+      const first = await this.client.placeBid(session.token, {
+        itemId: target.itemId,
+        sellerId: target.sellerId,
+        bidAmount: firstAmount,
+        bidType: 1
+      });
+
+      if (first.isSuccess) {
+        this.updateStatus(key, 'SNIPE SUCCESS', firstAmount);
+        this.onUpdate({
+          type: 'alert',
+          payload: { message: `[${session.id}] | WIN | Item #${target.itemId} | $${firstAmount.toFixed(2)}` }
+        });
+        return;
+      }
+
+      if (!/bid too low/i.test(first.message ?? '')) {
+        this.updateStatus(key, `FAILED: ${first.message ?? 'unknown'}`, firstAmount);
+        return;
+      }
+
+      const retryAmount = firstAmount + 1;
+      if (retryAmount > target.maxBid) {
+        this.updateStatus(key, 'FAILED: low bid, above max', firstAmount);
+        return;
+      }
+
+      const retry = await this.client.placeBid(session.token, {
+        itemId: target.itemId,
+        sellerId: target.sellerId,
+        bidAmount: retryAmount,
+        bidType: 1
+      });
+
+      if (retry.isSuccess) {
+        this.updateStatus(key, 'SNIPE SUCCESS (RETRY)', retryAmount);
+        this.onUpdate({
+          type: 'alert',
+          payload: { message: `[${session.id}] | WIN | Item #${target.itemId} | $${retryAmount.toFixed(2)}` }
+        });
+      } else {
+        this.updateStatus(key, `FAILED: ${retry.message ?? 'unknown'}`, retryAmount);
+      }
+    } catch (error) {
+      this.updateStatus(key, `ERROR: ${(error as Error).message}`);
     }
-  } catch {
-    return null;
   }
-  return null;
+
+  private updateStatus(key: string, status: string, lastBid?: number): void {
+    const target = this.targets.get(key);
+    if (!target) return;
+    target.status = status;
+    if (lastBid !== undefined) target.lastBid = lastBid;
+    this.broadcastState();
+  }
+
+  private broadcastState(): void {
+    this.onUpdate({ type: 'state', payload: this.snapshot() });
+  }
 }
 
 function sleep(ms: number): Promise<void> {
