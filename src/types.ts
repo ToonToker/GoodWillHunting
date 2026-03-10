@@ -48,14 +48,14 @@ export interface PlaceBidResult {
   minimumNextBid?: number;
 }
 
-export interface LiveTarget {
+export interface BattleRow {
   accountId: string;
   itemId: number;
   sellerId: number;
   title: string;
   imageUrl: string;
   currentPrice: number;
-  maxBid: number;
+  maxBid: number | null;
   endTimeMs: number;
   status: string;
   lastBid?: number;
@@ -66,6 +66,7 @@ export interface BidPayload {
   sellerId: number;
   bidAmount: number;
   bidType: 1;
+  isProxy: true;
 }
 
 export interface SessionStore {

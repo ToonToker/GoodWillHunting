@@ -8,7 +8,7 @@ import { logError, logInfo, logWarn } from './logger.js';
 import { LocalSessionStore } from './sessionStore.js';
 import { ShopGoodwillClient } from './shopgoodwillClient.js';
 import { SniperEngine } from './sniperEngine.js';
-import { ntpOffsetMs } from './timing.js';
+import { TokenManager } from './tokenManager.js';
 import type { AccountCredential, AccountSession } from './types.js';
 
 const app = express();
@@ -23,9 +23,13 @@ async function boot(): Promise<void> {
   const store = new LocalSessionStore('sessions.json');
   const tokenCache = await store.loadTokens();
 
-  const offset = await ntpOffsetMs();
-  if (offset === 0) logWarn('NTP unavailable, using local clock.');
-  else logInfo(`NTP offset ${offset}ms`);
+  let offset = 0;
+  try {
+    offset = await client.getServerTimeOffsetMs();
+    logInfo(`Server time sync offset=${offset}ms`);
+  } catch {
+    logWarn('Server time sync unavailable, using local clock.');
+  }
 
   const avgRttMs = await client.measureApiRtt(5);
   const triggerAdjustMs = clamp(Math.round((avgRttMs - 200) / 2), -100, 100);
@@ -39,7 +43,6 @@ async function boot(): Promise<void> {
 
   await mkdir(dirname('sessions.json'), { recursive: true }).catch(() => undefined);
   await store.save(sessions);
-  setInterval(() => void store.save(sessions), 60_000).unref();
 
   const server = createServer(app);
   const wss = new WebSocketServer({ server });
@@ -52,31 +55,27 @@ async function boot(): Promise<void> {
   };
 
   const engine = new SniperEngine(client, config, sessions, offset, triggerAdjustMs, (event) => broadcast(event));
+  const tokenManager = new TokenManager(client, config, sessions, async () => {
+    await store.save(sessions);
+    broadcast({ type: 'accounts', payload: accountState(sessions) });
+    await engine.pollFavorites();
+  });
+
   engine.start();
+  tokenManager.start();
+  setInterval(() => void store.save(sessions), 60_000).unref();
 
   app.get('/api/state', (_req: Request, res: Response) => {
     res.json({
       triggerAdjustMs,
       avgRttMs,
       targets: engine.snapshot(),
-      accounts: sessions.map((s) => ({
-        id: s.id,
-        username: s.username,
-        refreshedAt: s.refreshedAt,
-        connected: s.connected,
-        lastError: s.lastError ?? null
-      }))
+      accounts: accountState(sessions)
     });
   });
 
   app.post('/api/accounts/refresh', async (_req: Request, res: Response) => {
-    for (const session of sessions) {
-      const refreshed = await loginAccount(client, session);
-      session.token = refreshed.token;
-      session.refreshedAt = refreshed.refreshedAt;
-      session.connected = refreshed.connected;
-      session.lastError = refreshed.lastError;
-    }
+    await tokenManager.refreshAll();
     await store.save(sessions);
     res.json({ ok: true });
   });
@@ -98,6 +97,7 @@ async function boot(): Promise<void> {
     sessions.push(session);
     await saveAccounts(config.accountsPath, accountVault);
     await store.save(sessions);
+    broadcast({ type: 'accounts', payload: accountState(sessions) });
     res.json({ ok: true });
   });
 
@@ -108,6 +108,7 @@ async function boot(): Promise<void> {
     if (idx >= 0) sessions.splice(idx, 1);
     await saveAccounts(config.accountsPath, accountVault);
     await store.save(sessions);
+    broadcast({ type: 'accounts', payload: accountState(sessions) });
     res.json({ ok: true });
   });
 
@@ -123,7 +124,7 @@ async function boot(): Promise<void> {
   });
 
   server.listen(config.port, () => {
-    logInfo(`Horus Dashboard Omega listening on http://localhost:${config.port}`);
+    logInfo(`Horus Omega Logos-Engine listening on http://localhost:${config.port}`);
   });
 }
 
@@ -151,6 +152,16 @@ async function loginAccount(client: ShopGoodwillClient, account: AccountCredenti
   }
 }
 
+function accountState(sessions: AccountSession[]): Array<{ id: string; username: string; refreshedAt: number; connected: boolean; lastError: string | null }> {
+  return sessions.map((s) => ({
+    id: s.id,
+    username: s.username,
+    refreshedAt: s.refreshedAt,
+    connected: s.connected,
+    lastError: s.lastError ?? null
+  }));
+}
+
 function parseWatchUrl(url: string): { itemId: number; sellerId: number } | null {
   try {
     const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
@@ -162,9 +173,10 @@ function parseWatchUrl(url: string): { itemId: number; sellerId: number } | null
       return { itemId: itemParam, sellerId: sellerParam };
     }
 
-    const itemMatch = parsed.pathname.match(/(\d{5,})/g);
-    if (!itemMatch || itemMatch.length < 2) return null;
-    return { itemId: Number(itemMatch[0]), sellerId: Number(itemMatch[1]) };
+    const nums = (parsed.pathname.match(/(\d{5,})/g) ?? []).map((n) => Number(n));
+    if (nums.length >= 2) return { itemId: nums[0], sellerId: nums[1] };
+
+    return null;
   } catch {
     return null;
   }

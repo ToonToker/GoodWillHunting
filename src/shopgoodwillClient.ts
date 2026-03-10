@@ -23,6 +23,22 @@ export class ShopGoodwillClient {
     return token;
   }
 
+  async getServerTimeOffsetMs(): Promise<number> {
+    const start = Date.now();
+    const res = await request(`${this.config.baseUrl}/api`, {
+      method: 'GET',
+      dispatcher: this.dispatcher,
+      headers: this.baseHeaders()
+    });
+    const end = Date.now();
+    const serverDateHeader = res.headers.date;
+    if (!serverDateHeader) return 0;
+    const serverTs = Date.parse(Array.isArray(serverDateHeader) ? serverDateHeader[0] : serverDateHeader);
+    if (!Number.isFinite(serverTs)) return 0;
+    const midpoint = start + (end - start) / 2;
+    return serverTs - midpoint;
+  }
+
   async measureApiRtt(sampleCount = 5): Promise<number> {
     const samples: number[] = [];
     for (let i = 0; i < sampleCount; i += 1) {
@@ -34,7 +50,7 @@ export class ShopGoodwillClient {
           headers: this.baseHeaders()
         });
       } catch {
-        // Even 401/404/network edge still provides transport RTT value when reachable.
+        // transport-level timing sample
       }
       const elapsedNs = process.hrtime.bigint() - start;
       samples.push(Number(elapsedNs / 1_000_000n));

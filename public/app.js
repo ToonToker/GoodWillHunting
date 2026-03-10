@@ -2,6 +2,7 @@ const battleMap = document.getElementById('battleMap');
 const accountsNode = document.getElementById('accounts');
 const alertsNode = document.getElementById('alerts');
 const latencyInfo = document.getElementById('latencyInfo');
+const heartbeatsNode = document.getElementById('heartbeats');
 
 let targets = [];
 let accounts = [];
@@ -16,18 +17,28 @@ function formatCountdown(endTimeMs) {
   return `${minutes}:${seconds}.${millis}`;
 }
 
+function renderHeartbeats() {
+  heartbeatsNode.innerHTML = accounts
+    .map(
+      (a) => `<div class="bg-slate-800 border border-slate-700 rounded p-3">
+        <div class="flex justify-between items-center">
+          <div class="font-medium">${a.id}</div>
+          <span class="text-xs px-2 py-0.5 rounded ${a.connected ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${a.connected ? 'ONLINE' : 'OFFLINE'}</span>
+        </div>
+        <div class="text-xs text-slate-400 mt-1">${a.username}</div>
+        <div class="text-xs text-slate-500 mt-1">Token: ${new Date(a.refreshedAt).toLocaleTimeString()}</div>
+        ${a.lastError ? `<div class="text-xs text-rose-400 mt-1">${a.lastError}</div>` : ''}
+      </div>`
+    )
+    .join('');
+}
+
 function renderAccounts() {
   accountsNode.innerHTML = accounts
     .map(
       (a) => `<li class="bg-slate-800 border border-slate-700 rounded p-2 flex items-center justify-between gap-2">
-        <div>
-          <div class="font-medium">${a.id}</div>
-          <div class="text-xs text-slate-400">${a.username}</div>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="w-2.5 h-2.5 rounded-full ${a.connected ? 'bg-emerald-500' : 'bg-rose-500'}"></span>
-          <button data-id="${a.id}" class="removeAccount text-xs bg-rose-600 hover:bg-rose-500 px-2 py-1 rounded">Remove</button>
-        </div>
+        <div class="font-medium">${a.id}</div>
+        <button data-id="${a.id}" class="removeAccount text-xs bg-rose-600 hover:bg-rose-500 px-2 py-1 rounded">Remove</button>
       </li>`
     )
     .join('');
@@ -38,6 +49,8 @@ function renderAccounts() {
       await loadInitial();
     };
   });
+
+  renderHeartbeats();
 }
 
 function renderBattleMap() {
@@ -48,7 +61,7 @@ function renderBattleMap() {
         <td class="py-2 font-mono">#${t.itemId}</td>
         <td class="py-2">${t.accountId}</td>
         <td class="py-2">$${Number(t.currentPrice || 0).toFixed(2)}</td>
-        <td class="py-2">$${Number(t.maxBid).toFixed(2)}</td>
+        <td class="py-2">${t.maxBid === null ? '-' : `$${Number(t.maxBid).toFixed(2)}`}</td>
         <td class="py-2 font-mono">${formatCountdown(t.endTimeMs)}</td>
         <td class="py-2">${t.status}</td>
       </tr>`
@@ -88,6 +101,7 @@ document.getElementById('refreshAccounts').onclick = async () => {
 
 document.getElementById('addAccountForm').onsubmit = async (event) => {
   event.preventDefault();
+  const form = event.target;
   const id = document.getElementById('accId').value.trim();
   const username = document.getElementById('accUser').value.trim();
   const password = document.getElementById('accPass').value;
@@ -101,15 +115,17 @@ document.getElementById('addAccountForm').onsubmit = async (event) => {
     alert(data.message || 'Failed to add account');
     return;
   }
-  event.target.reset();
+  form.reset();
   await loadInitial();
 };
 
 const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
 ws.onmessage = (event) => {
   const msg = JSON.parse(event.data);
-  if (msg.type === 'state') {
-    targets = msg.payload;
+  if (msg.type === 'state') targets = msg.payload;
+  if (msg.type === 'accounts') {
+    accounts = msg.payload;
+    renderAccounts();
   }
   if (msg.type === 'alert') {
     const li = document.createElement('li');
