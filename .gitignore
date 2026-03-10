@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+accounts.json
+sessions.json
+
+assignments.json

@@ -1,0 +1,26 @@
+{
+  "name": "horus-dashboard",
+  "version": "0.3.0",
+  "description": "ShopGoodwill sniper dashboard with Node.js backend, Express API, and WebSocket live updates.",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "undici": "^7.16.0",
+    "ws": "^8.18.3",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.13.14",
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.20.5",
+    "typescript": "^5.8.2"
+  }
+}
