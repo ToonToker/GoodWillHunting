@@ -1,23 +1,31 @@
 # Project GoodWillHunting
 
-A high-performance, multi-account, API-ONLY Sovereign Sniper Engine for ShopGoodwill.
+A high-performance, multi-account, API-only sniper dashboard for ShopGoodwill.
 
-## SETUP
+## Setup
 
 1. Install **Node.js 20+**.
-2. Install dependencies (explicit command requested):
-
-```bash
-npm install undici express dotenv ws
-```
-
-3. Then install project dev/runtime lock set:
+2. Install dependencies:
 
 ```bash
 npm install
 ```
 
-## ACCOUNTS
+3. Create account file:
+
+```bash
+cp accounts.example.json accounts.json
+```
+
+4. Start the app:
+
+```bash
+npm run dev
+```
+
+Open `http://localhost:3000`.
+
+## Accounts
 
 Create `accounts.json` in the project root:
 
@@ -27,51 +35,30 @@ Create `accounts.json` in the project root:
     "id": "AccountA",
     "username": "your-username",
     "password": "your-password"
-  },
-  {
-    "id": "AccountB",
-    "username": "your-second-username",
-    "password": "your-second-password"
   }
 ]
 ```
 
-The engine stores active JWT snapshots in `sessions.json` and re-authenticates only when token expiry is detected.
+## New Staged Workflow (Query → Set Max → Confirm)
 
-## THE COMMAND
+1. Enter **Item ID or URL** in the **Query Item** input.
+2. Review the item details once it appears in the Battle Map.
+3. Enter your **Max Bid** for that row.
+4. Click **Lock & Confirm** to authorize the automated 2.8s strike window.
 
-On the official ShopGoodwill site:
+### Status badges
 
-1. Heart/favorite the item.
-2. Open the Favorite **Notes** field.
-3. Enter JSON like:
+- **UNCONFIRMED** (yellow): item queried, waiting for bid lock.
+- **CONFIRMED** (green): lock complete, item is queued for execution.
+- **ENDED** (red): auction has closed.
 
-```json
-{"max": 100.00}
-```
+Only **CONFIRMED** items are eligible for background snipe execution.
 
-Optional stepped note format:
+## API notes
 
-```json
-{"max": 150.00, "step": 1.00}
-```
-
-Favorites are synced every 60 seconds. Any favorite with valid `max` note JSON becomes a LIVE target and is queued automatically.
-
-## PRECISION ADVISORY
-
-Operate the script with stable network and system load during the **Berkland Window** (final ~3 seconds):
-
-- Startup clock offset is synced from ShopGoodwill API `Date` header.
-- TLS/API pre-warm occurs at **T-10s**.
-- Proxy bid is fired at **T-2.5s**.
-- Final execution path uses `Atomics.wait` + `process.hrtime()` nanosecond spin to minimize drift.
-
-## Quick Start
-
-```bash
-cp accounts.example.json accounts.json
-npm run dev
-```
-
-Open `http://localhost:3000`.
+- Base API URL: `https://buyerapi.shopgoodwill.com/api/`
+- Query endpoint used for item lookup: `/Auction/GetItemDetail`
+- Requests include mandatory headers for buyerapi requests:
+  - `Origin: https://www.shopgoodwill.com`
+  - `Referer: https://www.shopgoodwill.com/`
+  - `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36`

@@ -2,7 +2,7 @@ import type { AppConfig } from './config.js';
 import { logError } from './logger.js';
 import { ShopGoodwillClient } from './shopgoodwillClient.js';
 import { preciseCountdown } from './timing.js';
-import type { AccountSession, BattleRow, DirectWatch, FavoriteItem } from './types.js';
+import type { AccountSession, BattleRow, FavoriteItem, TargetStatus } from './types.js';
 
 interface UpdateEvent {
   type: 'state' | 'alert';
@@ -10,9 +10,8 @@ interface UpdateEvent {
 }
 
 export class SniperEngine {
-  private readonly rows = new Map<string, BattleRow>();
-  private readonly active = new Set<string>();
-  private readonly directInput = new Map<number, DirectWatch>();
+  private readonly rows = new Map<number, BattleRow>();
+  private readonly active = new Set<number>();
 
   constructor(
     private readonly client: ShopGoodwillClient,
@@ -29,18 +28,40 @@ export class SniperEngine {
     setInterval(() => void this.pollFavorites(), this.config.favoritesPollMs).unref();
   }
 
-  addDirectItem(itemId: number, sellerId: number): void {
-    if (Number.isFinite(itemId) && Number.isFinite(sellerId)) {
-      this.directInput.set(itemId, { itemId, sellerId });
-      this.emitMaaKheru(itemId, 'SYSTEM', 'QUEUED');
-    }
-  }
-
   setAssignment(itemId: number, accountId: string): void {
-    if (!Number.isFinite(itemId)) return;
+    const row = this.rows.get(itemId);
+    if (!row) return;
+    const next = accountId || this.defaultAccountId();
+    if (next) row.accountId = next;
     if (!accountId) this.assignments.delete(itemId);
     else this.assignments.set(itemId, accountId);
-    this.emitMaaKheru(itemId, accountId || 'AUTO', 'QUEUED');
+    this.broadcastState();
+  }
+
+  addOrUpdateQueriedItem(row: BattleRow): void {
+    const existing = this.rows.get(row.itemId);
+    this.rows.set(row.itemId, existing ? { ...existing, ...row, status: existing.status } : row);
+    this.emitMaaKheru(row.itemId, row.accountId || 'AUTO', 'UNCONFIRMED');
+    this.broadcastState();
+  }
+
+  confirmItem(itemId: number, maxBid: number): { ok: true } {
+    const row = this.rows.get(itemId);
+    if (!row) throw new Error('Item not found in local list. Query it first.');
+    if (Date.now() >= row.endTimeMs) {
+      row.status = 'ended';
+      this.broadcastState();
+      throw new Error('Auction already ended.');
+    }
+    if (maxBid <= row.currentPrice) throw new Error('Max bid must be higher than current bid.');
+
+    row.maxBid = Number(maxBid.toFixed(2));
+    row.status = 'confirmed';
+    row.stepBid = 1;
+    this.broadcastState();
+    this.emitMaaKheru(itemId, row.accountId, 'CONFIRMED');
+    this.maybeStartSnipes();
+    return { ok: true };
   }
 
   snapshot(): BattleRow[] {
@@ -49,6 +70,8 @@ export class SniperEngine {
 
   async pollFavorites(): Promise<void> {
     await Promise.all(this.sessions.map((s) => this.pollForAccount(s)));
+    this.updateEndedStatuses();
+    this.maybeStartSnipes();
     this.broadcastState();
   }
 
@@ -60,20 +83,14 @@ export class SniperEngine {
       session.lastError = undefined;
 
       for (const fav of favorites) {
-        const row = this.toBattleRow(session.id, fav);
+        const itemId = Number(fav.itemId ?? fav.ItemId);
+        if (!Number.isFinite(itemId)) continue;
+        const row = this.rows.get(itemId);
         if (!row) continue;
 
-        const assigned = this.assignments.get(row.itemId);
-        if (assigned && assigned !== session.id) continue;
-
-        const key = `${session.id}:${row.itemId}`;
-        const existing = this.rows.get(key);
-        this.rows.set(key, existing ? { ...existing, ...row } : row);
-
-        if (row.maxBid !== null && !this.active.has(key)) {
-          this.active.add(key);
-          void this.snipe(session, row, key).finally(() => this.active.delete(key));
-        }
+        this.applyFavoriteUpdate(row, fav);
+        const assigned = this.assignments.get(itemId);
+        if (assigned && row.accountId !== assigned) row.accountId = assigned;
       }
     } catch (error) {
       session.connected = false;
@@ -82,58 +99,56 @@ export class SniperEngine {
     }
   }
 
-  private toBattleRow(accountId: string, fav: FavoriteItem): BattleRow | null {
-    const itemId = Number(fav.itemId ?? fav.ItemId);
-    const sellerIdFromFav = Number(fav.sellerId ?? fav.SellerID ?? 0);
+  private applyFavoriteUpdate(row: BattleRow, fav: FavoriteItem): void {
+    const currentPrice = Number(fav.currentPrice ?? row.currentPrice);
+    if (Number.isFinite(currentPrice) && currentPrice > 0) row.currentPrice = currentPrice;
+
     const endTimeMs = Date.parse(String(fav.endTime ?? fav.EndTime ?? ''));
-    if (!Number.isFinite(itemId) || !Number.isFinite(endTimeMs)) return null;
+    if (Number.isFinite(endTimeMs)) row.endTimeMs = endTimeMs + this.clockOffsetMs;
 
-    const noteText = String(fav.notes ?? fav.Notes ?? '').trim();
-    let maxBid: number | null = null;
-    let stepBid = 1;
-    if (noteText.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(noteText) as { max?: number; step?: number };
-        if (typeof parsed.max === 'number' && parsed.max > 0) maxBid = parsed.max;
-        if (typeof parsed.step === 'number' && parsed.step > 0) stepBid = parsed.step;
-      } catch {
-        maxBid = null;
-      }
-    }
+    const title = String(fav.title ?? '').trim();
+    if (title) row.title = title;
 
-    const direct = this.directInput.get(itemId);
-    const sellerId = direct?.sellerId || sellerIdFromFav;
-    if (maxBid === null && direct) {
-      maxBid = Number(fav.minimumBid ?? fav.currentPrice ?? 1);
-    }
+    const imageUrl = String(fav.imageUrl ?? fav.imageURL ?? '').trim();
+    if (imageUrl) row.imageUrl = imageUrl;
 
-    const status = maxBid !== null ? 'LIVE TARGET' : 'FAVORITE';
-    return {
-      accountId,
-      itemId,
-      sellerId,
-      title: fav.title ?? `Item ${itemId}`,
-      imageUrl: String(fav.imageUrl ?? fav.imageURL ?? ''),
-      currentPrice: Number(fav.currentPrice ?? 0),
-      maxBid,
-      stepBid,
-      endTimeMs: endTimeMs + this.clockOffsetMs,
-      status
-    };
+    const sellerId = Number(fav.sellerId ?? fav.SellerID ?? row.sellerId);
+    if (Number.isFinite(sellerId) && sellerId > 0) row.sellerId = sellerId;
   }
 
-  private async snipe(session: AccountSession, row: BattleRow, key: string): Promise<void> {
+  private maybeStartSnipes(): void {
+    for (const row of this.rows.values()) {
+      if (row.status !== 'confirmed') continue;
+      if (Date.now() >= row.endTimeMs) {
+        row.status = 'ended';
+        continue;
+      }
+      if (this.active.has(row.itemId)) continue;
+
+      const session = this.sessionForRow(row);
+      if (!session || !session.token) continue;
+
+      this.active.add(row.itemId);
+      void this.snipe(session, row).finally(() => this.active.delete(row.itemId));
+    }
+  }
+
+  private sessionForRow(row: BattleRow): AccountSession | undefined {
+    return this.sessions.find((s) => s.id === row.accountId && s.connected && Boolean(s.token));
+  }
+
+  private async snipe(session: AccountSession, row: BattleRow): Promise<void> {
     if (row.maxBid === null || row.sellerId <= 0) return;
 
     try {
-      this.updateStatus(key, 'QUEUED');
+      row.status = 'sniping';
+      this.broadcastState();
+
       const warmAt = row.endTimeMs - 10_000;
       const fireAt = row.endTimeMs - (this.config.fireLeadMs + this.triggerAdjustMs);
 
       if (warmAt > Date.now()) await sleep(warmAt - Date.now());
-      this.updateStatus(key, 'SNIPING');
       await this.client.warmBidConnection(session.token);
-
       await preciseCountdown(fireAt);
 
       const firstAmount = jitterBid(Math.max(row.maxBid - row.stepBid, 1), row.maxBid);
@@ -146,80 +161,72 @@ export class SniperEngine {
       });
 
       if (first.isSuccess) {
-        this.updateStatus(key, 'WIN', firstAmount);
+        row.status = 'win';
+        row.lastBid = firstAmount;
         this.emitMaaKheru(row.itemId, session.id, 'WIN');
+        this.broadcastState();
         return;
       }
 
-      if (!/bid too low/i.test(first.message ?? '') || Date.now() >= row.endTimeMs) {
-        this.updateStatus(key, 'FAILED', firstAmount);
-        this.emitMaaKheru(row.itemId, session.id, 'FAILED');
-        return;
-      }
-
-      const retryAmount = Number((firstAmount + row.stepBid).toFixed(2));
-      if (retryAmount <= row.maxBid) {
-        const retry = await this.client.placeBid(session.token, {
-          itemId: row.itemId,
-          sellerId: row.sellerId,
-          bidAmount: retryAmount,
-          bidType: 1,
-          isProxy: true
-        });
-        if (retry.isSuccess) {
-          this.updateStatus(key, 'WIN', retryAmount);
-          this.emitMaaKheru(row.itemId, session.id, 'WIN');
-          return;
-        }
-      }
-
-      // token pooling failover: immediate alternate-account counter fire
-      await this.counterFireWithPool(row, session.id, retryAmount > row.maxBid ? row.maxBid : retryAmount);
-      this.updateStatus(key, 'FAILED', retryAmount);
+      row.lastBid = firstAmount;
+      row.status = Date.now() >= row.endTimeMs ? 'ended' : 'failed';
+      this.emitMaaKheru(row.itemId, session.id, row.status.toUpperCase());
+      this.broadcastState();
     } catch (error) {
-      this.updateStatus(key, `ERROR: ${(error as Error).message}`);
+      row.status = 'failed';
+      this.emitMaaKheru(row.itemId, session.id, `ERROR ${(error as Error).message}`);
+      this.broadcastState();
     }
   }
 
-  private async counterFireWithPool(row: BattleRow, primaryAccountId: string, amount: number): Promise<void> {
-    if (Date.now() >= row.endTimeMs) return;
-
-    const eligible = this.sessions.filter((s) => s.connected && s.token && s.id !== primaryAccountId);
-    const attempts = eligible.map((s) =>
-      this.client
-        .placeBid(s.token, {
-          itemId: row.itemId,
-          sellerId: row.sellerId,
-          bidAmount: amount,
-          bidType: 1,
-          isProxy: true
-        })
-        .then((result) => ({ session: s, result }))
-    );
-
-    if (attempts.length === 0) return;
-
-    const winner = await Promise.race(attempts);
-    if (winner.result.isSuccess) {
-      this.emitMaaKheru(row.itemId, winner.session.id, 'WIN');
+  private updateEndedStatuses(): void {
+    for (const row of this.rows.values()) {
+      if (Date.now() >= row.endTimeMs && (row.status === 'unconfirmed' || row.status === 'confirmed' || row.status === 'sniping')) {
+        row.status = 'ended';
+      }
     }
+  }
+
+  private defaultAccountId(): string {
+    return this.sessions.find((s) => s.connected && s.token)?.id ?? this.sessions[0]?.id ?? '';
   }
 
   private emitMaaKheru(itemId: number, accountId: string, status: string): void {
     this.onUpdate({ type: 'alert', payload: { message: `[${itemId}] | [${accountId}] | [${status}]` } });
   }
 
-  private updateStatus(key: string, status: string, lastBid?: number): void {
-    const row = this.rows.get(key);
-    if (!row) return;
-    row.status = status;
-    if (lastBid !== undefined) row.lastBid = lastBid;
-    this.broadcastState();
-  }
-
   private broadcastState(): void {
     this.onUpdate({ type: 'state', payload: this.snapshot() });
   }
+}
+
+export function toBattleRowFromItemDetail(
+  detail: Record<string, unknown>,
+  accountId: string,
+  clockOffsetMs: number,
+  fallbackItemId: number
+): BattleRow {
+  const itemId = Number(detail.itemId ?? detail.ItemId ?? fallbackItemId);
+  const sellerId = Number(detail.sellerId ?? detail.SellerID ?? 0);
+  const endTimeRaw = String(detail.endTime ?? detail.EndTime ?? detail.endDate ?? detail.EndDate ?? '');
+  const parsedEnd = Date.parse(endTimeRaw);
+  const endTimeMs = Number.isFinite(parsedEnd) ? parsedEnd + clockOffsetMs : Date.now() + 60_000;
+  const currentPrice = Number(detail.currentPrice ?? detail.CurrentPrice ?? detail.minimumBid ?? detail.MinimumBid ?? 0);
+  const title = String(detail.title ?? detail.Title ?? `Item ${itemId}`);
+  const imageUrl = String(detail.imageUrl ?? detail.ImageUrl ?? detail.imageURL ?? detail.ImageURL ?? '');
+
+  return {
+    accountId,
+    itemId,
+    sellerId,
+    title,
+    imageUrl,
+    currentPrice: Number.isFinite(currentPrice) ? currentPrice : 0,
+    maxBid: null,
+    stepBid: 1,
+    endTimeMs,
+    status: 'unconfirmed' satisfies TargetStatus
+  };
 }
 
 function sleep(ms: number): Promise<void> {
