@@ -78,3 +78,7 @@ export interface DirectWatch {
   itemId: number;
   sellerId: number;
 }
+
+export interface AssignmentMap {
+  [itemId: string]: string;
+}

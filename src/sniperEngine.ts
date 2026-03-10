@@ -18,6 +18,7 @@ export class SniperEngine {
     private readonly client: ShopGoodwillClient,
     private readonly config: AppConfig,
     private readonly sessions: AccountSession[],
+    private readonly assignments: Map<number, string>,
     private readonly clockOffsetMs: number,
     private readonly triggerAdjustMs: number,
     private readonly onUpdate: (event: UpdateEvent) => void
@@ -33,6 +34,16 @@ export class SniperEngine {
       this.directInput.set(itemId, { itemId, sellerId });
       this.onUpdate({ type: 'alert', payload: { message: `Direct target queued: Item ${itemId} / Seller ${sellerId}` } });
     }
+  }
+
+  setAssignment(itemId: number, accountId: string): void {
+    if (!Number.isFinite(itemId)) return;
+    if (!accountId) {
+      this.assignments.delete(itemId);
+    } else {
+      this.assignments.set(itemId, accountId);
+    }
+    this.onUpdate({ type: 'alert', payload: { message: `Assignment updated: Item ${itemId} -> ${accountId || 'auto'}` } });
   }
 
   snapshot(): BattleRow[] {
@@ -54,6 +65,9 @@ export class SniperEngine {
       for (const fav of favorites) {
         const row = this.toBattleRow(session.id, fav);
         if (!row) continue;
+
+        const assigned = this.assignments.get(row.itemId);
+        if (assigned && assigned !== session.id) continue;
 
         const key = `${session.id}:${row.itemId}`;
         const existing = this.rows.get(key);
@@ -81,9 +95,8 @@ export class SniperEngine {
     let maxBid: number | null = null;
     if (noteText.startsWith('{')) {
       try {
-        const parsed = JSON.parse(noteText) as { max?: number; max_bid?: number };
+        const parsed = JSON.parse(noteText) as { max?: number };
         if (typeof parsed.max === 'number' && parsed.max > 0) maxBid = parsed.max;
-        if (typeof parsed.max_bid === 'number' && parsed.max_bid > 0) maxBid = parsed.max_bid;
       } catch {
         maxBid = null;
       }
@@ -126,7 +139,7 @@ export class SniperEngine {
 
       await preciseCountdown(fireAt);
 
-      const firstAmount = row.maxBid > 1 ? row.maxBid - 1 : row.maxBid;
+      const firstAmount = jitterBid(Math.max(row.maxBid - 1, 1), row.maxBid);
       const first = await this.client.placeBid(session.token, {
         itemId: row.itemId,
         sellerId: row.sellerId,
@@ -146,7 +159,7 @@ export class SniperEngine {
         return;
       }
 
-      const retryAmount = firstAmount + 1;
+      const retryAmount = Number((firstAmount + 1).toFixed(2));
       if (retryAmount > row.maxBid) {
         this.updateStatus(key, 'FAILED: BID TOO LOW / ABOVE MAX', firstAmount);
         return;
@@ -186,4 +199,14 @@ export class SniperEngine {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function jitterBid(base: number, max: number): number {
+  const floor = Math.floor(base);
+  const cents = 1 + Math.floor(Math.random() * 98);
+  const candidate = Number((floor + cents / 100).toFixed(2));
+  if (candidate > max) {
+    return Number(Math.min(max, base).toFixed(2));
+  }
+  return candidate;
 }

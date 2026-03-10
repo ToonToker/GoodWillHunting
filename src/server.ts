@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { loadAccounts, loadConfig, saveAccounts } from './config.js';
 import { logError, logInfo, logWarn } from './logger.js';
+import { AssignmentStore } from './assignmentStore.js';
 import { LocalSessionStore } from './sessionStore.js';
 import { ShopGoodwillClient } from './shopgoodwillClient.js';
 import { SniperEngine } from './sniperEngine.js';
@@ -21,7 +22,9 @@ async function boot(): Promise<void> {
 
   const client = new ShopGoodwillClient(config);
   const store = new LocalSessionStore('sessions.json');
+  const assignmentStore = new AssignmentStore('assignments.json');
   const tokenCache = await store.loadTokens();
+  const assignments = await assignmentStore.load();
 
   let offset = 0;
   try {
@@ -54,7 +57,7 @@ async function boot(): Promise<void> {
     });
   };
 
-  const engine = new SniperEngine(client, config, sessions, offset, triggerAdjustMs, (event) => broadcast(event));
+  const engine = new SniperEngine(client, config, sessions, assignments, offset, triggerAdjustMs, (event) => broadcast(event));
   const tokenManager = new TokenManager(client, config, sessions, async () => {
     await store.save(sessions);
     broadcast({ type: 'accounts', payload: accountState(sessions) });
@@ -69,6 +72,7 @@ async function boot(): Promise<void> {
     res.json({
       triggerAdjustMs,
       avgRttMs,
+      assignments: Object.fromEntries(assignments.entries()),
       targets: engine.snapshot(),
       accounts: accountState(sessions)
     });
@@ -106,9 +110,34 @@ async function boot(): Promise<void> {
     accountVault = accountVault.filter((a) => a.id !== id);
     const idx = sessions.findIndex((s) => s.id === id);
     if (idx >= 0) sessions.splice(idx, 1);
+
+    for (const [itemId, accountId] of assignments.entries()) {
+      if (accountId === id) assignments.delete(itemId);
+    }
+
     await saveAccounts(config.accountsPath, accountVault);
+    await assignmentStore.save(assignments);
     await store.save(sessions);
     broadcast({ type: 'accounts', payload: accountState(sessions) });
+    res.json({ ok: true });
+  });
+
+  app.post('/api/assign', async (req: Request, res: Response) => {
+    const itemId = Number(req.body?.itemId);
+    const accountId = String(req.body?.accountId ?? '');
+    if (!Number.isFinite(itemId)) {
+      res.status(400).json({ ok: false, message: 'itemId required' });
+      return;
+    }
+    if (accountId && !sessions.some((s) => s.id === accountId)) {
+      res.status(404).json({ ok: false, message: 'account not found' });
+      return;
+    }
+
+    engine.setAssignment(itemId, accountId);
+    if (!accountId) assignments.delete(itemId);
+    else assignments.set(itemId, accountId);
+    await assignmentStore.save(assignments);
     res.json({ ok: true });
   });
 
@@ -124,7 +153,7 @@ async function boot(): Promise<void> {
   });
 
   server.listen(config.port, () => {
-    logInfo(`Horus Omega Logos-Engine listening on http://localhost:${config.port}`);
+    logInfo(`GoodWillHunting Logos-Engine listening on http://localhost:${config.port}`);
   });
 }
 

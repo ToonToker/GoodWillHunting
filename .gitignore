@@ -3,3 +3,5 @@ dist/
 *.log
 accounts.json
 sessions.json
+
+assignments.json

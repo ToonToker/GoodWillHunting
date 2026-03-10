@@ -1,37 +1,46 @@
-# Project Horus-Omega
+# Project GoodWillHunting
 
-High-performance, multi-account, headless API sniper for ShopGoodwill with a minimalist Tailwind dashboard.
+High-performance, multi-account, API-only Sovereign Engine for ShopGoodwill.
 
-## Logos-Engine Architecture
+## Core Engine (Logos)
 
-- **Runtime:** Node.js + `undici` + `ws`.
-- **Direct API path:** hits `buyerapi.shopgoodwill.com` endpoints directly, including `/api/Auction/PlaceBid`.
-- **Multi-account vault:** reads unlimited credentials from `accounts.json`.
-- **Token Manager:** keeps JWTs in memory + `sessions.json` and auto-refreshes every **20 minutes**.
-- **Favorite-sync:** every 60s scans Favorites for each account; Note JSON with `{"max": ...}` or `{"max_bid": ...}` arms live targets.
-- **Berkland Window:** pre-warm at T-10s, fire at T-2.8s (plus latency adjustment).
-- **Precision:** final 5-second countdown uses `process.hrtime()` loop.
-- **Bid payload:** sends `itemId`, `sellerId`, `bidAmount`, `bidType`, and `isProxy: true`.
+- **Headless Node.js runtime** with no Puppeteer/Playwright/Selenium usage.
+- **Networking:** `undici` HTTP/1.1 client for direct buyer API communication.
+- **Clock sync on startup:** server-time offset derived from ShopGoodwill API response headers.
+- **Snipe cadence:**
+  - Pre-warm connection at **T-10s**.
+  - Fire `/api/Auction/PlaceBid` at **T-2.5s** (with bounded latency adjustment).
+- **Final window timing:** uses a worker-thread + `Atomics.wait` strategy in final 5 seconds.
 
-## Startup Timing Calibration
+## Multi-Account Sovereignty
 
-- **Server clock sync:** computes offset from ShopGoodwill API `Date` header.
-- **Latency audit:** samples API RTT and applies bounded trigger shift (±100ms).
+- **accounts.json** supports multi-account credentials.
+- **sessions.json** persists account JWT snapshots.
+- **Token Manager:** checks validity and refreshes silently every **15 minutes**.
+- **Auction pooling:** UI supports assigning specific item IDs to specific accounts.
 
-## Maat Dashboard
+## The Maat Dashboard
 
-- Dark-mode, single-page Tailwind interface.
-- **Live Heartbeats:** account connection cards (green/red online status).
-- **Battle Map:** real-time table of favorites + live targets.
-- **Quick-Snipe:** paste URL containing item/seller identifiers to instantly queue a direct target.
-- **Maa Kheru Stream:** WebSocket event feed for sniper outcomes.
+- Single-page Tailwind dashboard served by local Express server.
+- Live account heartbeat cards (online/offline).
+- Real-time Battle Map table:
+  - Item ID
+  - Account
+  - Assigned Account override
+  - Current Price
+  - Countdown (ms)
+- Note-sync every 60s from Favorites: if Notes contain `{"max": 100.00}`, item becomes a LIVE target.
 
-## Setup
+## Performance Tuning
+
+- Uses `isProxy: true` in bid payload.
+- Randomizes bid cents for first fire (e.g. `$50.37`) while respecting max cap.
+- On “Bid too low”, retries once at `+1.00` if still `<= max`.
+
+## Run
 
 ```bash
 cp accounts.example.json accounts.json
 npm install
 npm run dev
 ```
-
-Open `http://localhost:3000`.

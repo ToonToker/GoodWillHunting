@@ -13,26 +13,58 @@ export class TokenManager {
 
   start(): void {
     setInterval(() => {
-      void this.refreshAll();
+      void this.refreshIfNeeded();
     }, this.config.tokenRefreshMs).unref();
   }
 
   async refreshAll(): Promise<void> {
+    await Promise.all(this.sessions.map((s) => this.refreshOne(s)));
+    await this.onChange();
+  }
+
+  async refreshIfNeeded(): Promise<void> {
     await Promise.all(
       this.sessions.map(async (session) => {
-        try {
-          session.token = await this.client.login(session.username, session.password);
-          session.refreshedAt = Date.now();
-          session.connected = true;
-          session.lastError = undefined;
-        } catch (error) {
-          session.connected = false;
-          session.lastError = (error as Error).message;
-          logError(`token refresh ${session.id}: ${(error as Error).message}`);
+        if (shouldRefresh(session.token)) {
+          await this.refreshOne(session);
         }
       })
     );
 
     await this.onChange();
+  }
+
+  private async refreshOne(session: AccountSession): Promise<void> {
+    try {
+      session.token = await this.client.login(session.username, session.password);
+      session.refreshedAt = Date.now();
+      session.connected = true;
+      session.lastError = undefined;
+    } catch (error) {
+      session.connected = false;
+      session.lastError = (error as Error).message;
+      logError(`token refresh ${session.id}: ${(error as Error).message}`);
+    }
+  }
+}
+
+function shouldRefresh(token: string): boolean {
+  if (!token) return true;
+  const expMs = decodeJwtExpMs(token);
+  if (!expMs) return true;
+  return expMs - Date.now() < 10 * 60_000;
+}
+
+function decodeJwtExpMs(token: string): number | null {
+  try {
+    const [, payload] = token.split('.');
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = Buffer.from(normalized, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded) as { exp?: number };
+    if (typeof parsed.exp !== 'number') return null;
+    return parsed.exp * 1000;
+  } catch {
+    return null;
   }
 }

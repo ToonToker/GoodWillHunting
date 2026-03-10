@@ -6,6 +6,7 @@ const heartbeatsNode = document.getElementById('heartbeats');
 
 let targets = [];
 let accounts = [];
+let assignments = {};
 
 function formatCountdown(endTimeMs) {
   const ms = endTimeMs - Date.now();
@@ -53,20 +54,45 @@ function renderAccounts() {
   renderHeartbeats();
 }
 
+function assignmentOptions(itemId) {
+  const current = assignments[itemId] || '';
+  const opts = ['<option value="">auto</option>'];
+  for (const acc of accounts) {
+    opts.push(`<option value="${acc.id}" ${current === acc.id ? 'selected' : ''}>${acc.id}</option>`);
+  }
+  return opts.join('');
+}
+
 function renderBattleMap() {
   battleMap.innerHTML = targets
     .map(
       (t) => `<tr class="border-b border-slate-800">
-        <td class="py-2"><img src="${t.imageUrl || 'https://via.placeholder.com/56x56?text=SGW'}" class="w-14 h-14 rounded object-cover border border-slate-700"/></td>
         <td class="py-2 font-mono">#${t.itemId}</td>
         <td class="py-2">${t.accountId}</td>
+        <td class="py-2">
+          <select data-item-id="${t.itemId}" class="assignSelect bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs">
+            ${assignmentOptions(t.itemId)}
+          </select>
+        </td>
         <td class="py-2">$${Number(t.currentPrice || 0).toFixed(2)}</td>
-        <td class="py-2">${t.maxBid === null ? '-' : `$${Number(t.maxBid).toFixed(2)}`}</td>
         <td class="py-2 font-mono">${formatCountdown(t.endTimeMs)}</td>
         <td class="py-2">${t.status}</td>
       </tr>`
     )
     .join('');
+
+  document.querySelectorAll('.assignSelect').forEach((sel) => {
+    sel.onchange = async () => {
+      const itemId = Number(sel.dataset.itemId);
+      const accountId = sel.value;
+      await fetch('/api/assign', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ itemId, accountId })
+      });
+      assignments[itemId] = accountId;
+    };
+  });
 }
 
 function render() {
@@ -79,6 +105,7 @@ async function loadInitial() {
   const data = await res.json();
   targets = data.targets ?? [];
   accounts = data.accounts ?? [];
+  assignments = data.assignments ?? {};
   latencyInfo.textContent = `Latency audit RTT: ${Number(data.avgRttMs ?? 0).toFixed(1)}ms | Trigger adjust: ${data.triggerAdjustMs ?? 0}ms`;
   renderAccounts();
 }
