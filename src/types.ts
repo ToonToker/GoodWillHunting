@@ -42,11 +42,20 @@ export interface FavoriteResponse {
   items?: FavoriteItem[];
 }
 
+export interface ItemDetailResponse {
+  isSuccess?: boolean;
+  message?: string;
+  data?: Record<string, unknown>;
+  item?: Record<string, unknown>;
+}
+
 export interface PlaceBidResult {
   isSuccess: boolean;
   message?: string;
   minimumNextBid?: number;
 }
+
+export type TargetStatus = 'unconfirmed' | 'confirmed' | 'sniping' | 'ended' | 'win' | 'failed';
 
 export interface BattleRow {
   accountId: string;
@@ -58,7 +67,7 @@ export interface BattleRow {
   maxBid: number | null;
   stepBid: number;
   endTimeMs: number;
-  status: string;
+  status: TargetStatus;
   lastBid?: number;
 }
 
