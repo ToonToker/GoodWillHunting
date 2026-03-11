@@ -8,13 +8,13 @@ A multi-account, API-only ShopGoodwill sniper with a staged **Query -> Display -
 2. Install required runtime packages:
 
 ```bash
-npm install undici express dotenv ws
+npm install
 ```
 
 3. Install project dependencies:
 
 ```bash
-npm install
+cp accounts.example.json accounts.json
 ```
 
 4. Create credentials file:
