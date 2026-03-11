@@ -14,13 +14,15 @@ export class ShopGoodwillClient {
       method: 'POST',
       dispatcher: this.dispatcher,
       headers: this.baseHeaders(),
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ userName: username, password, remember: false })
     });
     const body = (await res.body.json()) as LoginResponse;
     if (res.statusCode >= 400 || body.isSuccess === false) throw new Error(body.message ?? `status ${res.statusCode}`);
-    const token = body.token ?? body.jwt ?? (body.data && typeof body.data === 'object' ? String((body.data as Record<string, unknown>).token ?? '') : '');
-    if (!token) throw new Error('Missing token in login response');
-    return token;
+    const token = body.token ?? (body.data && typeof body.data === 'object' ? String((body.data as Record<string, unknown>).token ?? '') : '') ?? '';
+    // backward compatibility fallback for older responses
+    const normalizedToken = token || body.jwt || '';
+    if (!normalizedToken) throw new Error('Missing token in login response');
+    return normalizedToken;
   }
 
   async getServerTimeOffsetMs(): Promise<number> {

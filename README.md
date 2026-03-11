@@ -1,17 +1,17 @@
 # Project GoodWillHunting
 
-A high-performance, multi-account, API-only sniper dashboard for ShopGoodwill.
+A multi-account, API-only ShopGoodwill sniper with a staged **Query -> Display -> Lock** workflow.
 
 ## Setup
 
-1. Install **Node.js 20+**.
-2. Install required packages:
+1. Install Node.js 20+.
+2. Install required runtime packages:
 
 ```bash
 npm install
 ```
 
-3. Install project dependencies/lockfile:
+3. Install project dependencies:
 
 ```bash
 cp accounts.example.json accounts.json
@@ -29,55 +29,60 @@ npm run dev
 cp accounts.example.json accounts.json
 ```
 
-5. Start the app:
+4. Create credentials file:
+
+```bash
+cp accounts.example.json accounts.json
+```
+
+5. Start server:
 
 ```bash
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open: `http://localhost:3000`
 
-## Accounts
+## accounts.json
 
-Create `accounts.json` in the project root:
+Put your credentials in `accounts.json`:
 
 ```json
 [
   {
     "id": "AccountA",
-    "username": "your-username",
+    "username": "you@example.com",
     "password": "your-password"
   }
 ]
 ```
 
-## Staged Workflow (Query → Display → Confirm)
+## Workflow (Query -> Display -> Lock)
 
-1. Enter an Item ID (or ShopGoodwill item URL) in the **Query** bar.
-2. Review item details in the **UNCONFIRMED** list/table row (title, current price, end time).
-3. Input your **Max Bid**.
-4. Click **Lock Snipe** to authorize the automated strike.
+1. Input credentials into `accounts.json`.
+2. Start server.
+3. Use the search bar to **Query** an item by **Item ID**.
+4. Review details in the table (UNCONFIRMED).
+5. Set **Max Bid** and click **LOCK** to authorize the snipe.
 
-### Status badges
+Only **CONFIRMED** rows are eligible for execution.
 
-- **UNCONFIRMED** (yellow): query successful, waiting for max-bid lock.
-- **CONFIRMED** (green): locked in and ready for strike.
-- **ENDED** (red): auction completed.
+## API Mapping
 
-Only **CONFIRMED** items are eligible for background snipe execution.
+- Base URL: `https://buyerapi.shopgoodwill.com/api/`
+- Login: `POST /SignIn/Login`
+  - Payload: `{ "userName": "...", "password": "...", "remember": false }`
+- Query: `GET /Auction/GetItemDetail?itemId=[ID]`
+- Bid: `POST /Auction/PlaceBid`
 
-## API mapping (2026)
+Required request headers on buyer API calls:
+- `Authority: buyerapi.shopgoodwill.com`
+- `Content-Type: application/json`
+- `Origin: https://www.shopgoodwill.com`
+- `Referer: https://www.shopgoodwill.com/`
+- `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`
 
-- Base API URL: `https://buyerapi.shopgoodwill.com/api/`
-- Login endpoint: `/SignIn/Login`
-- Query endpoint used for item lookup: `/Auction/GetItemDetail?itemId=[ID]`
-- Requests include required WAF headers:
-  - `Authority: buyerapi.shopgoodwill.com`
-  - `Origin: https://www.shopgoodwill.com`
-  - `Referer: https://www.shopgoodwill.com/`
-  - `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`
+## Precision
 
-## Precision behavior
-
-- Clock sync is performed from the ShopGoodwill API `Date` header.
-- Bid fire target is **exactly 2.5 seconds** before auction end time.
+- Clock drift is synced from API `Date` header.
+- Snipes are fired at **T-2.5 seconds** and only for **CONFIRMED** items.

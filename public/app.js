@@ -97,7 +97,7 @@ function renderBattleMap() {
         <td class="py-2 font-mono">${formatCountdown(t.endTimeMs)}</td>
         <td class="py-2">${statusBadge(t.status)}</td>
         <td class="py-2">
-          <button data-lock-item-id="${t.itemId}" ${t.status === 'ended' ? 'disabled' : ''} class="lockBtn px-3 py-1.5 rounded font-semibold text-xs bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-slate-700">LOCK SNIPE</button>
+          <button data-lock-item-id="${t.itemId}" ${t.status === 'ended' ? 'disabled' : ''} class="lockBtn px-3 py-1.5 rounded font-semibold text-xs bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-slate-700">LOCK</button>
         </td>
       </tr>`
     )
