@@ -17,18 +17,6 @@ npm install
 cp accounts.example.json accounts.json
 ```
 
-4. Start the app:
-
-```bash
-npm run dev
-```
-
-4. Create account file:
-
-```bash
-cp accounts.example.json accounts.json
-```
-
 4. Create credentials file:
 
 ```bash
@@ -76,6 +64,7 @@ Only **CONFIRMED** rows are eligible for execution.
 - Bid: `POST /Auction/PlaceBid`
 
 Required request headers on buyer API calls:
+- Confirmation switch for token persistence: `SGW_LOGIN_PERSISTENCE_CONFIRMATION_SWITCH=true` (set to `false` to disable `sessions.json` token persistence).
 - `Authority: buyerapi.shopgoodwill.com`
 - `Content-Type: application/json`
 - `Origin: https://www.shopgoodwill.com`

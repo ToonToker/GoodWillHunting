@@ -21,7 +21,7 @@ async function boot(): Promise<void> {
   let accountVault = await loadAccounts(config.accountsPath);
 
   const client = new ShopGoodwillClient(config);
-  const store = new LocalSessionStore('sessions.json');
+  const store = new LocalSessionStore('sessions.json', config.loginPersistenceConfirmationSwitch);
   const assignmentStore = new AssignmentStore('assignments.json');
   const tokenCache = await store.loadTokens();
   const assignments = await assignmentStore.load();

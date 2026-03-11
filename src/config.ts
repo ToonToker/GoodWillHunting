@@ -9,6 +9,7 @@ export interface AppConfig {
   fireLeadMs: number;
   port: number;
   accountsPath: string;
+  loginPersistenceConfirmationSwitch: boolean;
 }
 
 export function loadConfig(): AppConfig {
@@ -21,7 +22,8 @@ export function loadConfig(): AppConfig {
     tokenRefreshMs: 20 * 60_000,
     fireLeadMs: 2_500,
     port: Number(process.env.PORT ?? 3000),
-    accountsPath: process.env.ACCOUNTS_PATH ?? 'accounts.json'
+    accountsPath: process.env.ACCOUNTS_PATH ?? 'accounts.json',
+    loginPersistenceConfirmationSwitch: (process.env.SGW_LOGIN_PERSISTENCE_CONFIRMATION_SWITCH ?? 'true').toLowerCase() === 'true'
   };
 }
 
