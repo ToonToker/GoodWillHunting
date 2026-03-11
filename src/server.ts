@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
 import { createServer } from 'node:http';
 import { mkdir } from 'node:fs/promises';
@@ -9,7 +8,7 @@ import { logError, logInfo, logWarn } from './logger.js';
 import { AssignmentStore } from './assignmentStore.js';
 import { LocalSessionStore } from './sessionStore.js';
 import { ShopGoodwillClient } from './shopgoodwillClient.js';
-import { SniperEngine } from './sniperEngine.js';
+import { SniperEngine, toBattleRowFromItemDetail } from './sniperEngine.js';
 import { TokenManager } from './tokenManager.js';
 import type { AccountCredential, AccountSession } from './types.js';
 
@@ -22,7 +21,7 @@ async function boot(): Promise<void> {
   let accountVault = await loadAccounts(config.accountsPath);
 
   const client = new ShopGoodwillClient(config);
-  const store = new LocalSessionStore('sessions.json');
+  const store = new LocalSessionStore('sessions.json', config.loginPersistenceConfirmationSwitch);
   const assignmentStore = new AssignmentStore('assignments.json');
   const tokenCache = await store.loadTokens();
   const assignments = await assignmentStore.load();
@@ -77,6 +76,41 @@ async function boot(): Promise<void> {
       targets: engine.snapshot(),
       accounts: accountState(sessions)
     });
+  });
+
+  app.post('/api/query', async (req: Request, res: Response) => {
+    const itemId = extractItemId(String(req.body?.query ?? ''));
+    if (!itemId) {
+      res.status(400).json({ ok: false, message: 'Provide an item ID or URL.' });
+      return;
+    }
+
+    try {
+      const token = sessions.find((s) => s.connected && s.token)?.token;
+      const accountId = sessions.find((s) => s.connected && s.token)?.id ?? sessions[0]?.id ?? 'UNASSIGNED';
+      const detail = await client.getItemDetail(itemId, token);
+      const row = toBattleRowFromItemDetail(detail, accountId, offset, itemId);
+      engine.addOrUpdateQueriedItem(row);
+      res.json({ ok: true, itemId: row.itemId });
+    } catch (error) {
+      res.status(502).json({ ok: false, message: (error as Error).message });
+    }
+  });
+
+  app.post('/api/confirm', (req: Request, res: Response) => {
+    const itemId = Number(req.body?.itemId);
+    const maxBid = Number(req.body?.maxBid);
+    if (!Number.isFinite(itemId) || !Number.isFinite(maxBid)) {
+      res.status(400).json({ ok: false, message: 'itemId and maxBid are required.' });
+      return;
+    }
+
+    try {
+      engine.confirmItem(itemId, maxBid);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(400).json({ ok: false, message: (error as Error).message });
+    }
   });
 
   app.post('/api/accounts/refresh', async (_req: Request, res: Response) => {
@@ -142,17 +176,6 @@ async function boot(): Promise<void> {
     res.json({ ok: true });
   });
 
-  app.post('/api/watch', (req: Request, res: Response) => {
-    const url = String(req.body?.url ?? '');
-    const parsed = parseWatchUrl(url);
-    if (!parsed) {
-      res.status(400).json({ ok: false, message: 'Could not parse itemId/sellerId from URL.' });
-      return;
-    }
-    engine.addDirectItem(parsed.itemId, parsed.sellerId);
-    res.json({ ok: true, ...parsed });
-  });
-
   server.listen(config.port, () => {
     logInfo(`GoodWillHunting Logos-Engine listening on http://localhost:${config.port}`);
   });
@@ -192,21 +215,18 @@ function accountState(sessions: AccountSession[]): Array<{ id: string; username:
   }));
 }
 
-function parseWatchUrl(url: string): { itemId: number; sellerId: number } | null {
+function extractItemId(input: string): number | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+
   try {
-    const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
     const parsed = new URL(normalized);
     const itemParam = Number(parsed.searchParams.get('itemid') ?? parsed.searchParams.get('itemId'));
-    const sellerParam = Number(parsed.searchParams.get('sellerid') ?? parsed.searchParams.get('sellerId'));
-
-    if (Number.isFinite(itemParam) && Number.isFinite(sellerParam)) {
-      return { itemId: itemParam, sellerId: sellerParam };
-    }
-
-    const nums = (parsed.pathname.match(/(\d{5,})/g) ?? []).map((n) => Number(n));
-    if (nums.length >= 2) return { itemId: nums[0], sellerId: nums[1] };
-
-    return null;
+    if (Number.isFinite(itemParam)) return itemParam;
+    const match = parsed.pathname.match(/(\d{5,})/);
+    return match ? Number(match[1]) : null;
   } catch {
     return null;
   }
