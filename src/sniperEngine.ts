@@ -2,6 +2,7 @@ import type { AppConfig } from './config.js';
 import { logError } from './logger.js';
 import { ShopGoodwillClient } from './shopgoodwillClient.js';
 import { preciseCountdown } from './timing.js';
+import { logWorkflow } from './diagnostics.js';
 import type { AccountSession, BattleRow, FavoriteItem, TargetStatus } from './types.js';
 
 interface UpdateEvent {
@@ -26,6 +27,10 @@ export class SniperEngine {
   start(): void {
     void this.pollFavorites();
     setInterval(() => void this.pollFavorites(), this.config.favoritesPollMs).unref();
+  }
+
+  hasActiveSession(): boolean {
+    return this.sessions.some((s) => s.connected && Boolean(s.token));
   }
 
   setAssignment(itemId: number, accountId: string): void {
@@ -69,6 +74,12 @@ export class SniperEngine {
   }
 
   async pollFavorites(): Promise<void> {
+    if (!this.hasActiveSession()) {
+      logWorkflow({ event: 'poll.skip.no-active-session', activeSession: false });
+      this.broadcastState();
+      return;
+    }
+
     await Promise.all(this.sessions.map((s) => this.pollForAccount(s)));
     this.updateEndedStatuses();
     this.maybeStartSnipes();
@@ -117,6 +128,11 @@ export class SniperEngine {
   }
 
   private maybeStartSnipes(): void {
+    if (!this.hasActiveSession()) {
+      logWorkflow({ event: 'schedule.blocked.no-active-session', activeSession: false });
+      return;
+    }
+
     for (const row of this.rows.values()) {
       if (row.status !== 'confirmed') continue;
       if (Date.now() >= row.endTimeMs) {
@@ -129,6 +145,7 @@ export class SniperEngine {
       if (!session || !session.token) continue;
 
       this.active.add(row.itemId);
+      logWorkflow({ event: 'schedule.dispatch', itemId: row.itemId, activeSession: true, detail: `account=${session.id}` });
       void this.snipe(session, row).finally(() => this.active.delete(row.itemId));
     }
   }

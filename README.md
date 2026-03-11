@@ -75,3 +75,16 @@ Required request headers on buyer API calls:
 
 - Clock drift is synced from API `Date` header.
 - Snipes are fired at **T-2.5 seconds** and only for **CONFIRMED** items.
+
+
+## Verbose Diagnostic Layer
+
+The server now emits high-visibility logs for auth/routing/api traces:
+
+- `[AUTH-STATE]` current active session + token readiness on route changes.
+- `[API-REQUEST]` full URL, method, and headers for login/API calls.
+- `[API-RESPONSE]` status code and raw response body text.
+- `[ROUTING]` from/to paths and final status code for API requests.
+- `[WORKFLOW]` state-machine dispatch/block events (including no active session guards).
+
+Snipe dispatch is blocked unless an active authenticated session exists.

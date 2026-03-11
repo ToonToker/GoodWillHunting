@@ -10,6 +10,7 @@ import { LocalSessionStore } from './sessionStore.js';
 import { ShopGoodwillClient } from './shopgoodwillClient.js';
 import { SniperEngine, toBattleRowFromItemDetail } from './sniperEngine.js';
 import { TokenManager } from './tokenManager.js';
+import { logAuthState, logRouting, logWorkflow } from './diagnostics.js';
 import type { AccountCredential, AccountSession } from './types.js';
 
 const app = express();
@@ -68,17 +69,43 @@ async function boot(): Promise<void> {
   tokenManager.start();
   setInterval(() => void store.save(sessions), 60_000).unref();
 
+
+  app.use('/api', (req: Request, res: Response, next) => {
+    const from = safePathFromReferer(String(req.headers.referer ?? 'direct'));
+    const to = req.originalUrl;
+    logRouting({ from, to, method: req.method });
+    res.on('finish', () => {
+      const connectedAccounts = sessions.filter((s) => s.connected).length;
+      const tokenAccounts = sessions.filter((s) => Boolean(s.token)).length;
+      logAuthState('route-change', {
+        activeSession: engine.hasActiveSession(),
+        connectedAccounts,
+        tokenAccounts,
+        user: sessions.find((s) => s.connected && s.token)?.id
+      });
+      logRouting({ from, to, method: req.method, statusCode: res.statusCode });
+    });
+    next();
+  });
+
   app.get('/api/state', (_req: Request, res: Response) => {
     res.json({
       triggerAdjustMs,
       avgRttMs,
       assignments: Object.fromEntries(assignments.entries()),
       targets: engine.snapshot(),
-      accounts: accountState(sessions)
+      accounts: accountState(sessions),
+      activeSession: engine.hasActiveSession()
     });
   });
 
   app.post('/api/query', async (req: Request, res: Response) => {
+    if (!engine.hasActiveSession()) {
+      logWorkflow({ event: 'query.blocked.no-active-session', activeSession: false });
+      res.status(503).json({ ok: false, message: 'No active session. Refresh accounts/login first.' });
+      return;
+    }
+
     const itemId = extractItemId(String(req.body?.query ?? ''));
     if (!itemId) {
       res.status(400).json({ ok: false, message: 'Provide an item ID or URL.' });
@@ -98,6 +125,12 @@ async function boot(): Promise<void> {
   });
 
   app.post('/api/confirm', (req: Request, res: Response) => {
+    if (!engine.hasActiveSession()) {
+      logWorkflow({ event: 'confirm.blocked.no-active-session', activeSession: false });
+      res.status(503).json({ ok: false, message: 'No active session. Refresh accounts/login first.' });
+      return;
+    }
+
     const itemId = Number(req.body?.itemId);
     const maxBid = Number(req.body?.maxBid);
     if (!Number.isFinite(itemId) || !Number.isFinite(maxBid)) {
@@ -229,6 +262,16 @@ function extractItemId(input: string): number | null {
     return match ? Number(match[1]) : null;
   } catch {
     return null;
+  }
+}
+
+
+function safePathFromReferer(referer: string): string {
+  try {
+    if (!/^https?:\/\//i.test(referer)) return referer;
+    return new URL(referer).pathname;
+  } catch {
+    return referer;
   }
 }
 
