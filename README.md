@@ -29,6 +29,18 @@ cp accounts.example.json accounts.json
 npm run dev
 ```
 
+4. Create credentials file:
+
+```bash
+cp accounts.example.json accounts.json
+```
+
+5. Start server:
+
+```bash
+npm run dev
+```
+
 Open: `http://localhost:3000`
 
 ## accounts.json
@@ -78,6 +90,8 @@ Required request headers on buyer API calls:
 
 
 ## Verbose Diagnostic Layer
+
+- Authentication performs a pre-flight `GET https://www.shopgoodwill.com/` and reuses captured session cookies for `SignIn/Login`.
 
 The server now emits high-visibility logs for auth/routing/api traces:
 

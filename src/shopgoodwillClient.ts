@@ -7,6 +7,7 @@ export class ShopGoodwillClient {
   private readonly dispatcher: Agent;
   private loginInFlight: Promise<string> | null = null;
   private nextLoginAttemptAt = 0;
+  private sessionCookie = '';
 
   constructor(private readonly config: AppConfig) {
     this.dispatcher = new Agent({ connections: 150, keepAliveTimeout: 30_000, keepAliveMaxTimeout: 120_000, pipelining: 1 });
@@ -16,53 +17,63 @@ export class ShopGoodwillClient {
     if (this.loginInFlight) return this.loginInFlight;
 
     const waitMs = this.nextLoginAttemptAt - Date.now();
-    if (waitMs > 0) {
-      throw new Error(`Auth back-off active. Retry in ${Math.ceil(waitMs / 1000)}s`);
-    }
+    if (waitMs > 0) throw new Error(`Auth back-off active. Retry in ${Math.ceil(waitMs / 1000)}s`);
 
     this.loginInFlight = (async () => {
+      await this.preflightSessionCookie();
+
       const url = this.endpoint('SignIn/Login');
-      const headers = this.baseHeaders();
-      const payload = { UserName: username, Password: password, remember: false };
-      console.log('[DEBUG-PAYLOAD]', JSON.stringify({ ...payload, Password: '****' }));
+      const base = this.baseHeaders();
+      const payloadCandidates = [
+        { UserName: username, Password: password, remember: false },
+        { username, password, remember: false },
+        { username, password, rememberMe: true }
+      ];
 
-      const { statusCode, json, text } = await this.requestJson<LoginResponse>(
-        url,
-        {
-          method: 'POST',
-          dispatcher: this.dispatcher,
-          headers,
-          body: JSON.stringify(payload)
-        },
-        'auth.login'
-      );
+      for (const payload of payloadCandidates) {
+        console.log('[DEBUG-PAYLOAD]', JSON.stringify({ ...payload, Password: '****', password: '****' }));
+        const { statusCode, json, text, headers } = await this.requestJson<LoginResponse>(
+          url,
+          {
+            method: 'POST',
+            dispatcher: this.dispatcher,
+            headers: base,
+            body: JSON.stringify(payload)
+          },
+          'auth.login'
+        );
 
-      const response = json ?? {};
-      if (response.status === false) {
-        this.nextLoginAttemptAt = Date.now() + 60_000;
-        console.error('API Rejected Credentials:', response.message ?? text);
-        logApiResponse({ label: 'auth.login.status.false', statusCode, body: text });
-        throw new Error(response.message ?? 'Authentication failed (status=false)');
-      }
-      if (statusCode >= 400 || response.isSuccess === false) {
-        this.nextLoginAttemptAt = Date.now() + 60_000;
-        throw new Error(response.message ?? `status ${statusCode}`);
-      }
+        const setCookie = headers['set-cookie'] ?? '';
+        console.log('[DEBUG-COOKIES]', setCookie);
+        this.captureSetCookie(setCookie);
 
-      const token =
-        response.token ??
-        response.accessToken ??
-        (response.data && typeof response.data === 'object' ? String((response.data as Record<string, unknown>).token ?? '') : '') ??
-        '';
-      const normalizedToken = token || response.jwt || response.refreshToken || '';
-      if (!normalizedToken) {
-        this.nextLoginAttemptAt = Date.now() + 60_000;
+        const response = json ?? {};
+        if (response.status === false) {
+          console.error('API Rejected Credentials:', response.message ?? text);
+          logApiResponse({ label: 'auth.login.status.false', statusCode, body: text });
+          continue;
+        }
+        if (statusCode >= 400 || response.isSuccess === false) {
+          logApiResponse({ label: 'auth.login.http-failure', statusCode, body: text });
+          continue;
+        }
+
+        const token =
+          response.token ??
+          response.accessToken ??
+          (response.data && typeof response.data === 'object' ? String((response.data as Record<string, unknown>).token ?? '') : '') ??
+          '';
+        const normalizedToken = token || response.jwt || response.refreshToken || '';
+        if (normalizedToken) {
+          this.nextLoginAttemptAt = 0;
+          return normalizedToken;
+        }
+
         logApiResponse({ label: 'auth.login.missing-token', statusCode, body: text });
-        throw new Error('Missing token in login response');
       }
 
-      this.nextLoginAttemptAt = 0;
-      return normalizedToken;
+      this.nextLoginAttemptAt = Date.now() + 60_000;
+      throw new Error('Authentication failed after payload parity checks.');
     })();
 
     try {
@@ -171,16 +182,51 @@ export class ShopGoodwillClient {
     return json ?? { isSuccess: false, message: 'empty response' };
   }
 
-  private async requestJson<T>(url: string, options: any, label: string): Promise<{ statusCode: number; text: string; json: T | null }> {
-    logApiRequest({ label, method: options.method ?? 'GET', url, headers: normalizeHeaders(options.headers) });
+  private async preflightSessionCookie(): Promise<void> {
+    const url = 'https://www.shopgoodwill.com/';
+    const headers = {
+      origin: 'https://www.shopgoodwill.com',
+      referer: 'https://www.shopgoodwill.com/',
+      'user-agent': this.config.userAgent,
+      accept: 'text/html,application/xhtml+xml'
+    };
+
+    logApiRequest({ label: 'auth.preflight', method: 'GET', url, headers });
+    const res = await request(url, {
+      method: 'GET',
+      dispatcher: this.dispatcher,
+      headers
+    });
+
+    const setCookie = res.headers['set-cookie'] ?? '';
+    console.log('[DEBUG-COOKIES]', setCookie);
+    this.captureSetCookie(setCookie);
+    logApiResponse({ label: 'auth.preflight', statusCode: res.statusCode, body: '' });
+  }
+
+  private captureSetCookie(raw: string | string[] | undefined): void {
+    const cookies = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    if (cookies.length === 0) return;
+    const values = cookies.map((cookie) => cookie.split(';')[0]).filter(Boolean);
+    if (values.length > 0) this.sessionCookie = values.join('; ');
+  }
+
+  private async requestJson<T>(url: string, options: any, label: string): Promise<{ statusCode: number; text: string; json: T | null; headers: Record<string, string | string[]> }> {
+    const headers = normalizeHeaders(options.headers);
+    if (this.sessionCookie && !headers.cookie) headers.cookie = this.sessionCookie;
+    options.headers = headers;
+
+    logApiRequest({ label, method: options.method ?? 'GET', url, headers });
     const res = await request(url, options);
+    const setCookie = res.headers['set-cookie'] ?? '';
+    if (setCookie) this.captureSetCookie(setCookie);
     const text = await res.body.text();
     logApiResponse({ label, statusCode: res.statusCode, body: text });
 
     try {
-      return { statusCode: res.statusCode, text, json: text ? (JSON.parse(text) as T) : null };
+      return { statusCode: res.statusCode, text, json: text ? (JSON.parse(text) as T) : null, headers: normalizeResponseHeaders(res.headers as Record<string, unknown>) };
     } catch {
-      return { statusCode: res.statusCode, text, json: null };
+      return { statusCode: res.statusCode, text, json: null, headers: normalizeResponseHeaders(res.headers as Record<string, unknown>) };
     }
   }
 
@@ -209,5 +255,13 @@ function normalizeHeaders(headers: any): Record<string, string> {
   if (!headers || Array.isArray(headers)) return {};
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(headers)) out[k] = String(v);
+  return out;
+}
+
+function normalizeResponseHeaders(headers: Record<string, unknown>): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (typeof v === 'string' || Array.isArray(v)) out[k] = v;
+  }
   return out;
 }

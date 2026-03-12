@@ -65,6 +65,8 @@ async function boot(): Promise<void> {
     await engine.pollFavorites();
   });
 
+  let authInProgress = false;
+
   engine.start();
   tokenManager.start();
   setInterval(() => void store.save(sessions), 60_000).unref();
@@ -147,9 +149,19 @@ async function boot(): Promise<void> {
   });
 
   app.post('/api/accounts/refresh', async (_req: Request, res: Response) => {
-    await tokenManager.refreshAll();
-    await store.save(sessions);
-    res.json({ ok: true });
+    if (authInProgress) {
+      res.status(429).json({ ok: false, message: 'Auth refresh already in progress' });
+      return;
+    }
+
+    authInProgress = true;
+    try {
+      await tokenManager.refreshAll();
+      await store.save(sessions);
+      res.json({ ok: true });
+    } finally {
+      authInProgress = false;
+    }
   });
 
   app.post('/api/accounts', async (req: Request, res: Response) => {
