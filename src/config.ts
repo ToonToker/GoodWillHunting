@@ -10,6 +10,17 @@ export interface AppConfig {
   port: number;
   accountsPath: string;
   loginPersistenceConfirmationSwitch: boolean;
+  authEncryptionMode: 'plaintext' | 'base64' | 'aes-cbc' | 'rsa' | 'xor-base64';
+  authAppVersion: string;
+  authClientIpAddress: string;
+  authBrowser: string;
+  authAesAlgorithm: string;
+  authAesKey?: string;
+  authAesIv?: string;
+  authRsaPublicKeyPem?: string;
+  authRsaPadding: 'oaep' | 'pkcs1';
+  authRsaOaepHash: string;
+  authXorKey?: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -23,7 +34,18 @@ export function loadConfig(): AppConfig {
     fireLeadMs: 2_500,
     port: Number(process.env.PORT ?? 3000),
     accountsPath: process.env.ACCOUNTS_PATH ?? 'accounts.json',
-    loginPersistenceConfirmationSwitch: (process.env.SGW_LOGIN_PERSISTENCE_CONFIRMATION_SWITCH ?? 'true').toLowerCase() === 'true'
+    loginPersistenceConfirmationSwitch: (process.env.SGW_LOGIN_PERSISTENCE_CONFIRMATION_SWITCH ?? 'true').toLowerCase() === 'true',
+    authEncryptionMode: ((process.env.SGW_AUTH_ENCRYPTION_MODE ?? 'base64').toLowerCase() as AppConfig['authEncryptionMode']) ?? 'base64',
+    authAppVersion: process.env.SGW_AUTH_APP_VERSION ?? 'web',
+    authClientIpAddress: process.env.SGW_AUTH_CLIENT_IP ?? '0.0.0.0',
+    authBrowser: process.env.SGW_AUTH_BROWSER ?? 'Chrome',
+    authAesAlgorithm: process.env.SGW_AUTH_AES_ALGORITHM ?? 'aes-256-cbc',
+    authAesKey: process.env.SGW_AUTH_AES_KEY,
+    authAesIv: process.env.SGW_AUTH_AES_IV,
+    authRsaPublicKeyPem: process.env.SGW_AUTH_RSA_PUBLIC_KEY_PEM,
+    authRsaPadding: ((process.env.SGW_AUTH_RSA_PADDING ?? 'oaep').toLowerCase() as AppConfig['authRsaPadding']) ?? 'oaep',
+    authRsaOaepHash: process.env.SGW_AUTH_RSA_OAEP_HASH ?? 'sha1',
+    authXorKey: process.env.SGW_AUTH_XOR_KEY
   };
 }
 
