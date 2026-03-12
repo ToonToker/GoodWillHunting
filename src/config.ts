@@ -9,6 +9,7 @@ export interface AppConfig {
   fireLeadMs: number;
   port: number;
   accountsPath: string;
+  loginPersistenceConfirmationSwitch: boolean;
 }
 
 export function loadConfig(): AppConfig {
@@ -16,12 +17,13 @@ export function loadConfig(): AppConfig {
     apiBaseUrl: process.env.SGW_API_BASE_URL ?? 'https://buyerapi.shopgoodwill.com/api/',
     userAgent:
       process.env.SGW_UA ??
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     favoritesPollMs: 60_000,
     tokenRefreshMs: 20 * 60_000,
     fireLeadMs: 2_500,
     port: Number(process.env.PORT ?? 3000),
-    accountsPath: process.env.ACCOUNTS_PATH ?? 'accounts.json'
+    accountsPath: process.env.ACCOUNTS_PATH ?? 'accounts.json',
+    loginPersistenceConfirmationSwitch: (process.env.SGW_LOGIN_PERSISTENCE_CONFIRMATION_SWITCH ?? 'true').toLowerCase() === 'true'
   };
 }
 
