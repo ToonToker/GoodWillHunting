@@ -29,18 +29,6 @@ cp accounts.example.json accounts.json
 npm run dev
 ```
 
-4. Create credentials file:
-
-```bash
-cp accounts.example.json accounts.json
-```
-
-5. Start server:
-
-```bash
-npm run dev
-```
-
 Open: `http://localhost:3000`
 
 ## accounts.json
@@ -102,3 +90,5 @@ The server now emits high-visibility logs for auth/routing/api traces:
 Snipe dispatch is blocked unless an active authenticated session exists.
 
 - Client state refresh uses adaptive back-off when `activeSession` is false to reduce request spam and rate-limit pressure.
+
+- Login failures (`status:false` or missing token) trigger a 60-second auth back-off to prevent request hammering.

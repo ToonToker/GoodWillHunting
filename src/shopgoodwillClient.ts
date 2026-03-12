@@ -6,6 +6,7 @@ import type { BidPayload, FavoriteItem, FavoriteResponse, ItemDetailResponse, Lo
 export class ShopGoodwillClient {
   private readonly dispatcher: Agent;
   private loginInFlight: Promise<string> | null = null;
+  private nextLoginAttemptAt = 0;
 
   constructor(private readonly config: AppConfig) {
     this.dispatcher = new Agent({ connections: 150, keepAliveTimeout: 30_000, keepAliveMaxTimeout: 120_000, pipelining: 1 });
@@ -14,10 +15,16 @@ export class ShopGoodwillClient {
   async login(username: string, password: string): Promise<string> {
     if (this.loginInFlight) return this.loginInFlight;
 
+    const waitMs = this.nextLoginAttemptAt - Date.now();
+    if (waitMs > 0) {
+      throw new Error(`Auth back-off active. Retry in ${Math.ceil(waitMs / 1000)}s`);
+    }
+
     this.loginInFlight = (async () => {
       const url = this.endpoint('SignIn/Login');
       const headers = this.baseHeaders();
-      const bodyPayload = JSON.stringify({ username, password, remember: false });
+      const payload = { UserName: username, Password: password, remember: false };
+      console.log('[DEBUG-PAYLOAD]', JSON.stringify({ ...payload, Password: '****' }));
 
       const { statusCode, json, text } = await this.requestJson<LoginResponse>(
         url,
@@ -25,28 +32,36 @@ export class ShopGoodwillClient {
           method: 'POST',
           dispatcher: this.dispatcher,
           headers,
-          body: bodyPayload
+          body: JSON.stringify(payload)
         },
         'auth.login'
       );
 
       const response = json ?? {};
       if (response.status === false) {
+        this.nextLoginAttemptAt = Date.now() + 60_000;
+        console.error('API Rejected Credentials:', response.message ?? text);
         logApiResponse({ label: 'auth.login.status.false', statusCode, body: text });
         throw new Error(response.message ?? 'Authentication failed (status=false)');
       }
-      if (statusCode >= 400 || response.isSuccess === false) throw new Error(response.message ?? `status ${statusCode}`);
+      if (statusCode >= 400 || response.isSuccess === false) {
+        this.nextLoginAttemptAt = Date.now() + 60_000;
+        throw new Error(response.message ?? `status ${statusCode}`);
+      }
 
       const token =
         response.token ??
         response.accessToken ??
         (response.data && typeof response.data === 'object' ? String((response.data as Record<string, unknown>).token ?? '') : '') ??
         '';
-      const normalizedToken = token || response.jwt || '';
+      const normalizedToken = token || response.jwt || response.refreshToken || '';
       if (!normalizedToken) {
+        this.nextLoginAttemptAt = Date.now() + 60_000;
         logApiResponse({ label: 'auth.login.missing-token', statusCode, body: text });
         throw new Error('Missing token in login response');
       }
+
+      this.nextLoginAttemptAt = 0;
       return normalizedToken;
     })();
 
