@@ -49,6 +49,7 @@ export class ShopGoodwillClient {
           method: 'POST',
           dispatcher: this.dispatcher,
           headers: jsonHeaders,
+          // parity with browser "withCredentials: true" behavior is maintained via cookie-jar propagation in requestJson.
           body: JSON.stringify(jsonPayload)
         },
         'auth.login'
@@ -58,10 +59,12 @@ export class ShopGoodwillClient {
       this.logCookieDiagnostics('auth.login');
 
       const payload = response ?? {};
+      console.info('[DEBUG-AUTH] loginResponse.data:', JSON.stringify(payload.data ?? null));
       if (payload.status === false) {
         this.nextLoginAttemptAt = Date.now() + 60_000;
         console.error('API Rejected Credentials:', payload.message ?? text);
         console.error('[DEBUG-AUTH] Full buyerapi response:', text);
+        console.error('[DEBUG-AUTH] loginResponse.data:', JSON.stringify(payload.data ?? null));
         console.error('[DEBUG-AUTH] buyerapi headers:', JSON.stringify(headers));
         logApiResponse({ label: 'auth.login.status.false', statusCode, body: text });
         throw new Error(this.classifyAuthFailure(statusCode, payload.message ?? text));
@@ -72,20 +75,31 @@ export class ShopGoodwillClient {
         throw new Error(this.classifyAuthFailure(statusCode, payload.message ?? `status ${statusCode}`));
       }
 
-      const token =
-        payload.token ??
+      const payloadData = payload.data && typeof payload.data === 'object' ? (payload.data as Record<string, unknown>) : {};
+      const accessToken =
         payload.accessToken ??
-        (payload.data && typeof payload.data === 'object' ? String((payload.data as Record<string, unknown>).token ?? '') : '') ??
+        (typeof payloadData.accessToken === 'string' ? payloadData.accessToken : '') ??
+        payload.token ??
+        (typeof payloadData.token === 'string' ? payloadData.token : '') ??
+        payload.jwt ??
         '';
-      const normalizedToken = token || payload.jwt || payload.refreshToken || '';
-      if (!normalizedToken) {
+      const refreshToken =
+        payload.refreshToken ??
+        (typeof payloadData.refreshToken === 'string' ? payloadData.refreshToken : '') ??
+        '';
+
+      if (!accessToken) {
         this.nextLoginAttemptAt = Date.now() + 60_000;
         logApiResponse({ label: 'auth.login.missing-token', statusCode, body: text });
         throw new Error('Missing token in login response');
       }
 
+      console.info(
+        `[DEBUG-AUTH] token extract status=true accessToken=${accessToken ? 'present' : 'missing'} refreshToken=${refreshToken ? 'present' : 'missing'}`
+      );
+
       this.nextLoginAttemptAt = 0;
-      return normalizedToken;
+      return accessToken;
     })();
 
     try {

@@ -21,6 +21,8 @@ export interface AppConfig {
   authRsaPadding: 'oaep' | 'pkcs1';
   authRsaOaepHash: string;
   authXorKey?: string;
+  encryptedUsername?: string;
+  encryptedPassword?: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -28,7 +30,7 @@ export function loadConfig(): AppConfig {
     apiBaseUrl: process.env.SGW_API_BASE_URL ?? 'https://buyerapi.shopgoodwill.com/api/',
     userAgent:
       process.env.SGW_UA ??
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
     favoritesPollMs: 60_000,
     tokenRefreshMs: 20 * 60_000,
     fireLeadMs: 2_500,
@@ -36,7 +38,7 @@ export function loadConfig(): AppConfig {
     accountsPath: process.env.ACCOUNTS_PATH ?? 'accounts.json',
     loginPersistenceConfirmationSwitch: (process.env.SGW_LOGIN_PERSISTENCE_CONFIRMATION_SWITCH ?? 'true').toLowerCase() === 'true',
     authEncryptionMode: ((process.env.SGW_AUTH_ENCRYPTION_MODE ?? 'base64').toLowerCase() as AppConfig['authEncryptionMode']) ?? 'base64',
-    authAppVersion: process.env.SGW_AUTH_APP_VERSION ?? 'web',
+    authAppVersion: process.env.SGW_APP_VERSION ?? process.env.SGW_AUTH_APP_VERSION ?? '0ac533a6087baed7',
     authClientIpAddress: process.env.SGW_AUTH_CLIENT_IP ?? '0.0.0.0',
     authBrowser: process.env.SGW_AUTH_BROWSER ?? 'Chrome',
     authAesAlgorithm: process.env.SGW_AUTH_AES_ALGORITHM ?? 'aes-256-cbc',
@@ -45,7 +47,9 @@ export function loadConfig(): AppConfig {
     authRsaPublicKeyPem: process.env.SGW_AUTH_RSA_PUBLIC_KEY_PEM,
     authRsaPadding: ((process.env.SGW_AUTH_RSA_PADDING ?? 'oaep').toLowerCase() as AppConfig['authRsaPadding']) ?? 'oaep',
     authRsaOaepHash: process.env.SGW_AUTH_RSA_OAEP_HASH ?? 'sha1',
-    authXorKey: process.env.SGW_AUTH_XOR_KEY
+    authXorKey: process.env.SGW_AUTH_XOR_KEY,
+    encryptedUsername: process.env.SGW_ENCRYPTED_USERNAME,
+    encryptedPassword: process.env.SGW_ENCRYPTED_PASSWORD
   };
 }
 
