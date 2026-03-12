@@ -71,7 +71,7 @@ Only **CONFIRMED** rows are eligible for execution.
 
 - Base URL: `https://buyerapi.shopgoodwill.com/api/`
 - Login: `POST /SignIn/Login`
-  - Payload: `{ "userName": "...", "password": "...", "remember": false }`
+  - Payload: `{ "UserName": "...", "Password": "..." }`
 - Query: `GET /Auction/GetItemDetail?itemId=[ID]`
 - Bid: `POST /Auction/PlaceBid`
 
@@ -81,7 +81,7 @@ Required request headers on buyer API calls:
 - `Content-Type: application/json`
 - `Origin: https://www.shopgoodwill.com`
 - `Referer: https://www.shopgoodwill.com/`
-- `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`
+- `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36`
 
 ## Precision
 
@@ -91,7 +91,7 @@ Required request headers on buyer API calls:
 
 ## Verbose Diagnostic Layer
 
-- Authentication performs a pre-flight `GET https://www.shopgoodwill.com/` and reuses captured session cookies for `SignIn/Login`.
+- Authentication performs a pre-flight `GET https://www.shopgoodwill.com/signin` and persists affinity cookies (`TiPMix`, `x-ms-routing-name`) plus session cookies for subsequent `SignIn/Login` and API calls.
 
 The server now emits high-visibility logs for auth/routing/api traces:
 
