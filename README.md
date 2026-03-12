@@ -91,7 +91,7 @@ Required request headers on buyer API calls:
 
 ## Verbose Diagnostic Layer
 
-- Authentication performs a pre-flight `GET https://www.shopgoodwill.com/signin` and persists affinity cookies (`TiPMix`, `x-ms-routing-name`) plus session cookies for subsequent `SignIn/Login` and API calls.
+- Authentication performs a pre-flight `GET https://www.shopgoodwill.com/SignIn/` and persists affinity cookies (`TiPMix`, `x-ms-routing-name`) plus session cookies for subsequent `SignIn/Login` and API calls.
 
 The server now emits high-visibility logs for auth/routing/api traces:
 
@@ -106,3 +106,5 @@ Snipe dispatch is blocked unless an active authenticated session exists.
 - Client state refresh uses adaptive back-off when `activeSession` is false to reduce request spam and rate-limit pressure.
 
 - Login failures (`status:false` or missing token) trigger a 60-second auth back-off to prevent request hammering.
+
+- Preflight logs now include `[DEBUG-PREFLIGHT-FINAL-URL]` and per-cookie domain diagnostics (`[DEBUG-COOKIE-DOMAIN]`) to detect Azure gatekeeper affinity.

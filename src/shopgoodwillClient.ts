@@ -8,9 +8,11 @@ export class ShopGoodwillClient {
   private loginInFlight: Promise<string> | null = null;
   private nextLoginAttemptAt = 0;
   private readonly cookieJar = new Map<string, string>();
+  private readonly handshakeUserAgent: string;
 
   constructor(private readonly config: AppConfig) {
     this.dispatcher = new Agent({ connections: 150, keepAliveTimeout: 30_000, keepAliveMaxTimeout: 120_000, pipelining: 1 });
+    this.handshakeUserAgent = this.config.userAgent;
   }
 
   async login(username: string, password: string): Promise<string> {
@@ -182,26 +184,42 @@ export class ShopGoodwillClient {
   }
 
   private async preflightSessionCookie(): Promise<void> {
-    const url = 'https://www.shopgoodwill.com/signin';
-    const headers = {
-      origin: 'https://www.shopgoodwill.com',
-      referer: 'https://www.shopgoodwill.com/',
-      'user-agent': this.config.userAgent,
-      accept: 'text/html,application/xhtml+xml'
-    };
+    let currentUrl = 'https://www.shopgoodwill.com/SignIn/';
+    const maxRedirects = 5;
 
-    logApiRequest({ label: 'auth.preflight', method: 'GET', url, headers });
-    const res = await request(url, {
-      method: 'GET',
-      dispatcher: this.dispatcher,
-      headers
-    });
+    for (let hop = 0; hop <= maxRedirects; hop += 1) {
+      const headers = {
+        origin: 'https://www.shopgoodwill.com',
+        referer: 'https://www.shopgoodwill.com/',
+        'user-agent': this.handshakeUserAgent,
+        accept: 'text/html,application/xhtml+xml',
+        ...(this.buildCookieHeader() ? { cookie: this.buildCookieHeader() } : {})
+      };
 
-    const setCookie = res.headers['set-cookie'] ?? '';
-    console.log('[DEBUG-COOKIES]', setCookie);
-    this.captureSetCookie(setCookie);
-    logApiResponse({ label: 'auth.preflight', statusCode: res.statusCode, body: '' });
+      logApiRequest({ label: 'auth.preflight', method: 'GET', url: currentUrl, headers });
+      const res = await request(currentUrl, {
+        method: 'GET',
+        dispatcher: this.dispatcher,
+        headers
+      });
+
+      const setCookie = res.headers['set-cookie'] ?? '';
+      console.log('[DEBUG-COOKIES]', setCookie);
+      this.captureSetCookie(setCookie);
+      logApiResponse({ label: 'auth.preflight', statusCode: res.statusCode, body: '' });
+
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        currentUrl = new URL(String(res.headers.location), currentUrl).toString();
+        continue;
+      }
+
+      console.log('[DEBUG-PREFLIGHT-FINAL-URL]', currentUrl);
+      return;
+    }
+
+    console.log('[DEBUG-PREFLIGHT-FINAL-URL]', currentUrl);
   }
+
 
   private captureSetCookie(raw: string | string[] | undefined): void {
     const cookies = Array.isArray(raw) ? raw : raw ? [raw] : [];
@@ -215,7 +233,12 @@ export class ShopGoodwillClient {
 
       const domainAttr = attributes.find((a) => /^domain=/i.test(a));
       const domain = domainAttr ? domainAttr.split('=')[1] : '(host-only)';
-      console.log(`[DEBUG-COOKIE-DOMAIN] name=${name} domain=${domain}`);
+      const trappedAzure = /azurewebsites\.net/i.test(domain);
+      if (trappedAzure) {
+        console.log(`[DEBUG-COOKIE-DOMAIN] name=${name} domain=${domain} action=strip-domain-for-buyerapi`);
+      } else {
+        console.log(`[DEBUG-COOKIE-DOMAIN] name=${name} domain=${domain}`);
+      }
     }
 
     const affinityCookies = ['TiPMix', 'x-ms-routing-name'];
@@ -266,7 +289,7 @@ export class ShopGoodwillClient {
       'x-requested-with': 'XMLHttpRequest',
       origin: 'https://www.shopgoodwill.com',
       referer: 'https://www.shopgoodwill.com/',
-      'user-agent': this.config.userAgent
+      'user-agent': this.handshakeUserAgent
     };
   }
 
