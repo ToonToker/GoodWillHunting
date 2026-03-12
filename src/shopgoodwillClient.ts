@@ -83,6 +83,7 @@ export class ShopGoodwillClient {
     }
   }
 
+
   async getServerTimeOffsetMs(): Promise<number> {
     const start = Date.now();
     const url = this.config.apiBaseUrl;
