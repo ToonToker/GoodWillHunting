@@ -27,14 +27,14 @@ export function encryptCredential(value: string, config: AppConfig): string {
 }
 
 export function buildEncryptedLoginPayload(username: string, password: string, csrfToken: string | undefined, config: AppConfig): LoginPayload {
-  const encryptedUserName = encryptCredential(username, config);
-  const encryptedPassword = encryptCredential(password, config);
+  const encryptedUserName = config.encryptedUsername ?? encryptCredential(username, config);
+  const encryptedPassword = config.encryptedPassword ?? encryptCredential(password, config);
 
   console.info(
-    `[DEBUG-AUTH] Encrypted User Length: ${encryptedUserName.length} chars; format=${inferEncoding(encryptedUserName)}; mode=${config.authEncryptionMode}`
+      `[DEBUG-AUTH] Encrypted User Length: ${encryptedUserName.length} chars; format=${inferEncoding(encryptedUserName)}; mode=${config.encryptedUsername ? 'verbatim-env' : config.authEncryptionMode}`
   );
   console.info(
-    `[DEBUG-AUTH] Encrypted Password Length: ${encryptedPassword.length} chars; format=${inferEncoding(encryptedPassword)}; mode=${config.authEncryptionMode}`
+      `[DEBUG-AUTH] Encrypted Password Length: ${encryptedPassword.length} chars; format=${inferEncoding(encryptedPassword)}; mode=${config.encryptedPassword ? 'verbatim-env' : config.authEncryptionMode}`
   );
 
   return {
