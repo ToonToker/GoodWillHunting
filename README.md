@@ -35,6 +35,12 @@ npm run dev
 cp accounts.example.json accounts.json
 ```
 
+4. Create credentials file:
+
+```bash
+cp accounts.example.json accounts.json
+```
+
 5. Start server:
 
 ```bash

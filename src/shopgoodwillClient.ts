@@ -9,6 +9,7 @@ export class ShopGoodwillClient {
   private nextLoginAttemptAt = 0;
   private readonly cookieJar = new Map<string, string>();
   private readonly handshakeUserAgent: string;
+  private csrfToken = '';
 
   constructor(private readonly config: AppConfig) {
     this.dispatcher = new Agent({ connections: 150, keepAliveTimeout: 30_000, keepAliveMaxTimeout: 120_000, pipelining: 1 });
@@ -25,19 +26,51 @@ export class ShopGoodwillClient {
       await this.preflightSessionCookie();
 
       const url = this.endpoint('SignIn/Login');
-      const payload = { UserName: username, Password: password };
-      console.log('[DEBUG-PAYLOAD]', JSON.stringify({ ...payload, Password: '****' }));
+      const jsonPayload = { UserName: username, Password: password };
+      console.log('[DEBUG-PAYLOAD]', JSON.stringify({ ...jsonPayload, Password: '****' }));
 
-      const { statusCode, json, text, headers } = await this.requestJson<LoginResponse>(
+      const jsonHeaders = {
+        ...this.baseHeaders(),
+        RequestVerificationToken: this.csrfToken,
+        'x-requested-with': 'XMLHttpRequest'
+      };
+
+      let attempt = await this.requestJson<LoginResponse>(
         url,
         {
           method: 'POST',
           dispatcher: this.dispatcher,
-          headers: this.baseHeaders(),
-          body: JSON.stringify(payload)
+          headers: jsonHeaders,
+          body: JSON.stringify(jsonPayload)
         },
         'auth.login'
       );
+
+      let { statusCode, json, text, headers } = attempt;
+      const firstResponse = json ?? {};
+
+      // .NET login stacks sometimes require form-urlencoded; fallback only when JSON path is rejected.
+      if (firstResponse.status === false || (statusCode >= 400 && !json)) {
+        const formPayload = new URLSearchParams({ UserName: username, Password: password }).toString();
+        const formHeaders = {
+          ...this.baseHeaders(),
+          RequestVerificationToken: this.csrfToken,
+          'x-requested-with': 'XMLHttpRequest',
+          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8'
+        };
+
+        attempt = await this.requestJson<LoginResponse>(
+          url,
+          {
+            method: 'POST',
+            dispatcher: this.dispatcher,
+            headers: formHeaders,
+            body: formPayload
+          },
+          'auth.login.form-fallback'
+        );
+        ({ statusCode, json, text, headers } = attempt);
+      }
 
       const setCookie = headers['set-cookie'] ?? '';
       console.log('[DEBUG-COOKIES]', setCookie);
@@ -202,6 +235,11 @@ export class ShopGoodwillClient {
         dispatcher: this.dispatcher,
         headers
       });
+
+      const body = await res.body.text();
+      const match = body.match(/name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"/i);
+      if (match?.[1]) this.csrfToken = match[1];
+      console.log('[DEBUG-CSRF-TOKEN]', this.csrfToken ? 'FOUND' : 'MISSING');
 
       const setCookie = res.headers['set-cookie'] ?? '';
       console.log('[DEBUG-COOKIES]', setCookie);
