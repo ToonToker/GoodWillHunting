@@ -26,16 +26,16 @@ export class ShopGoodwillClient {
       await this.preflightSessionCookie();
 
       const url = this.endpoint('SignIn/Login');
-      const jsonPayload = { UserName: username, Password: password };
+      const jsonPayload = { UserName: username, Password: password, __RequestVerificationToken: this.csrfToken, rememberMe: false };
       console.log('[DEBUG-PAYLOAD]', JSON.stringify({ ...jsonPayload, Password: '****' }));
 
       const jsonHeaders = {
         ...this.baseHeaders(),
         RequestVerificationToken: this.csrfToken,
-        'x-requested-with': 'XMLHttpRequest'
+        referer: 'https://shopgoodwill.com/SignIn/'
       };
 
-      let attempt = await this.requestJson<LoginResponse>(
+      const { statusCode, json: response, text, headers } = await this.requestJson<LoginResponse>(
         url,
         {
           method: 'POST',
@@ -45,56 +45,29 @@ export class ShopGoodwillClient {
         },
         'auth.login'
       );
-
-      let { statusCode, json, text, headers } = attempt;
-      const firstResponse = json ?? {};
-
-      // .NET login stacks sometimes require form-urlencoded; fallback only when JSON path is rejected.
-      if (firstResponse.status === false || (statusCode >= 400 && !json)) {
-        const formPayload = new URLSearchParams({ UserName: username, Password: password }).toString();
-        const formHeaders = {
-          ...this.baseHeaders(),
-          RequestVerificationToken: this.csrfToken,
-          'x-requested-with': 'XMLHttpRequest',
-          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8'
-        };
-
-        attempt = await this.requestJson<LoginResponse>(
-          url,
-          {
-            method: 'POST',
-            dispatcher: this.dispatcher,
-            headers: formHeaders,
-            body: formPayload
-          },
-          'auth.login.form-fallback'
-        );
-        ({ statusCode, json, text, headers } = attempt);
-      }
-
       const setCookie = headers['set-cookie'] ?? '';
-      console.log('[DEBUG-COOKIES]', setCookie);
       this.captureSetCookie(setCookie);
+      this.logCookieDiagnostics('auth.login');
 
-      const response = json ?? {};
-      if (response.status === false) {
+      const payload = response ?? {};
+      if (payload.status === false) {
         this.nextLoginAttemptAt = Date.now() + 60_000;
-        console.error('API Rejected Credentials:', response.message ?? text);
+        console.error('API Rejected Credentials:', payload.message ?? text);
         logApiResponse({ label: 'auth.login.status.false', statusCode, body: text });
-        throw new Error(response.message ?? 'Authentication failed (status=false)');
+        throw new Error(this.classifyAuthFailure(statusCode, payload.message ?? text));
       }
 
-      if (statusCode >= 400 || response.isSuccess === false) {
+      if (statusCode >= 400 || payload.isSuccess === false) {
         this.nextLoginAttemptAt = Date.now() + 60_000;
-        throw new Error(response.message ?? `status ${statusCode}`);
+        throw new Error(this.classifyAuthFailure(statusCode, payload.message ?? `status ${statusCode}`));
       }
 
       const token =
-        response.token ??
-        response.accessToken ??
-        (response.data && typeof response.data === 'object' ? String((response.data as Record<string, unknown>).token ?? '') : '') ??
+        payload.token ??
+        payload.accessToken ??
+        (payload.data && typeof payload.data === 'object' ? String((payload.data as Record<string, unknown>).token ?? '') : '') ??
         '';
-      const normalizedToken = token || response.jwt || response.refreshToken || '';
+      const normalizedToken = token || payload.jwt || payload.refreshToken || '';
       if (!normalizedToken) {
         this.nextLoginAttemptAt = Date.now() + 60_000;
         logApiResponse({ label: 'auth.login.missing-token', statusCode, body: text });
@@ -120,7 +93,7 @@ export class ShopGoodwillClient {
     const res = await request(url, {
       method: 'HEAD',
       dispatcher: this.dispatcher,
-      headers
+      headers: this.baseHeaders()
     });
 
     const end = Date.now();
@@ -217,19 +190,19 @@ export class ShopGoodwillClient {
   }
 
   private async preflightSessionCookie(): Promise<void> {
-    let currentUrl = 'https://www.shopgoodwill.com/SignIn/';
+    let currentUrl = 'https://shopgoodwill.com/SignIn/';
     const maxRedirects = 5;
 
     for (let hop = 0; hop <= maxRedirects; hop += 1) {
       const headers = {
-        origin: 'https://www.shopgoodwill.com',
-        referer: 'https://www.shopgoodwill.com/',
-        'user-agent': this.handshakeUserAgent,
         accept: 'text/html,application/xhtml+xml',
+        origin: 'https://shopgoodwill.com',
+        referer: 'https://shopgoodwill.com/',
+        'user-agent': this.handshakeUserAgent,
         ...(this.buildCookieHeader() ? { cookie: this.buildCookieHeader() } : {})
       };
-
       logApiRequest({ label: 'auth.preflight', method: 'GET', url: currentUrl, headers });
+
       const res = await request(currentUrl, {
         method: 'GET',
         dispatcher: this.dispatcher,
@@ -237,25 +210,47 @@ export class ShopGoodwillClient {
       });
 
       const body = await res.body.text();
-      const match = body.match(/name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"/i);
-      if (match?.[1]) this.csrfToken = match[1];
-      console.log('[DEBUG-CSRF-TOKEN]', this.csrfToken ? 'FOUND' : 'MISSING');
-
-      const setCookie = res.headers['set-cookie'] ?? '';
-      console.log('[DEBUG-COOKIES]', setCookie);
-      this.captureSetCookie(setCookie);
       logApiResponse({ label: 'auth.preflight', statusCode: res.statusCode, body: '' });
+      const setCookie = res.headers['set-cookie'] ?? '';
+      this.captureSetCookie(setCookie);
+      this.logCookieDiagnostics('auth.preflight');
+
+      const csrfMatch = body.match(/name="__RequestVerificationToken"[^>]*value="([^"]+)"/i);
+      if (csrfMatch?.[1]) {
+        this.csrfToken = csrfMatch[1];
+        console.info(`[AUTH-DIAG] label=auth.preflight csrf=true tokenPrefix=${this.csrfToken.slice(0, 10)}...`);
+      } else {
+        console.info('[AUTH-DIAG] label=auth.preflight csrf=false');
+      }
 
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        currentUrl = new URL(String(res.headers.location), currentUrl).toString();
+        const nextUrl = new URL(String(res.headers.location), currentUrl).toString();
+        console.info(`[AUTH-DIAG] label=auth.preflight redirect hop=${hop + 1} from=${currentUrl} to=${nextUrl} status=${res.statusCode}`);
+        currentUrl = nextUrl;
         continue;
       }
 
-      console.log('[DEBUG-PREFLIGHT-FINAL-URL]', currentUrl);
+      if (!this.csrfToken) {
+        throw new Error('Auth preflight failed: __RequestVerificationToken not found');
+      }
       return;
     }
 
-    console.log('[DEBUG-PREFLIGHT-FINAL-URL]', currentUrl);
+    throw new Error('Auth preflight exceeded redirect limit');
+  }
+
+  private logCookieDiagnostics(label: string): void {
+    const names = Array.from(this.cookieJar.keys()).sort();
+    console.info(`[AUTH-DIAG] label=${label} cookieCount=${names.length} cookies=${JSON.stringify(names)}`);
+  }
+
+  private classifyAuthFailure(statusCode: number, rawMessage: string): string {
+    const message = rawMessage.toLowerCase();
+    if (!this.csrfToken) return 'Authentication failed: missing anti-forgery token from sign-in form.';
+    if (statusCode === 401 || statusCode === 403) return 'Authentication failed: server denied request (authorization or anti-forgery validation).';
+    if (message.includes('username or password')) return 'Authentication failed: provider reported invalid credentials.';
+    if (statusCode >= 500) return 'Authentication failed: provider service error.';
+    return `Authentication failed: ${rawMessage}`;
   }
 
 
@@ -325,8 +320,8 @@ export class ShopGoodwillClient {
       'content-type': 'application/json',
       accept: 'application/json',
       'x-requested-with': 'XMLHttpRequest',
-      origin: 'https://www.shopgoodwill.com',
-      referer: 'https://www.shopgoodwill.com/',
+      origin: 'https://shopgoodwill.com',
+      referer: 'https://shopgoodwill.com/',
       'user-agent': this.handshakeUserAgent
     };
   }
