@@ -15,11 +15,14 @@ export interface AccountSession {
 }
 
 export interface LoginResponse {
+  status?: boolean;
   isSuccess?: boolean;
   message?: string;
   token?: string;
   jwt?: string;
   data?: Record<string, unknown>;
+  accessToken?: string;
+  refreshToken?: string;
 }
 
 export interface FavoriteItem {

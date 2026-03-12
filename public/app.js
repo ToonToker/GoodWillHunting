@@ -62,7 +62,7 @@ function renderAccounts() {
   document.querySelectorAll('.removeAccount').forEach((btn) => {
     btn.onclick = async () => {
       await fetch(`/api/accounts/${btn.dataset.id}`, { method: 'DELETE' });
-      await loadInitial();
+      await fetchState();
     };
   });
 
@@ -131,7 +131,7 @@ function renderBattleMap() {
         alert(data.message || 'Could not confirm item');
         return;
       }
-      await loadInitial();
+      await fetchState();
     };
   });
 }
@@ -141,7 +141,10 @@ function render() {
 }
 setInterval(render, 120);
 
-async function loadInitial() {
+let stateBackoffMs = 3000;
+let stateTimer = null;
+
+async function fetchState() {
   const res = await fetch('/api/state');
   const data = await res.json();
   targets = data.targets ?? [];
@@ -149,6 +152,19 @@ async function loadInitial() {
   assignments = data.assignments ?? {};
   latencyInfo.textContent = `Latency audit RTT: ${Number(data.avgRttMs ?? 0).toFixed(1)}ms | Trigger adjust: ${data.triggerAdjustMs ?? 0}ms`;
   renderAccounts();
+  stateBackoffMs = data.activeSession ? 3000 : Math.min(stateBackoffMs * 2, 30000);
+}
+
+function scheduleStateSync() {
+  if (stateTimer) clearTimeout(stateTimer);
+  stateTimer = setTimeout(async () => {
+    try {
+      await fetchState();
+    } catch {
+      stateBackoffMs = Math.min(stateBackoffMs * 2, 30000);
+    }
+    scheduleStateSync();
+  }, stateBackoffMs);
 }
 
 document.getElementById('queryItem').onclick = async () => {
@@ -163,12 +179,12 @@ document.getElementById('queryItem').onclick = async () => {
     alert(data.message || 'Failed to query item');
     return;
   }
-  await loadInitial();
+  await fetchState();
 };
 
 document.getElementById('refreshAccounts').onclick = async () => {
   await fetch('/api/accounts/refresh', { method: 'POST' });
-  await loadInitial();
+  await fetchState();
 };
 
 document.getElementById('addAccountForm').onsubmit = async (event) => {
@@ -188,7 +204,7 @@ document.getElementById('addAccountForm').onsubmit = async (event) => {
     return;
   }
   form.reset();
-  await loadInitial();
+  await fetchState();
 };
 
 const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
@@ -208,4 +224,4 @@ ws.onmessage = (event) => {
   }
 };
 
-loadInitial();
+fetchState().finally(scheduleStateSync);

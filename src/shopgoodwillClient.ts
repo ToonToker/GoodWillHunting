@@ -5,33 +5,58 @@ import type { BidPayload, FavoriteItem, FavoriteResponse, ItemDetailResponse, Lo
 
 export class ShopGoodwillClient {
   private readonly dispatcher: Agent;
+  private loginInFlight: Promise<string> | null = null;
 
   constructor(private readonly config: AppConfig) {
     this.dispatcher = new Agent({ connections: 150, keepAliveTimeout: 30_000, keepAliveMaxTimeout: 120_000, pipelining: 1 });
   }
 
   async login(username: string, password: string): Promise<string> {
-    const url = this.endpoint('SignIn/Login');
-    const headers = this.baseHeaders();
-    const bodyPayload = JSON.stringify({ userName: username, password, remember: false });
+    if (this.loginInFlight) return this.loginInFlight;
 
-    logApiRequest({ label: 'auth.login', method: 'POST', url, headers });
-    const { statusCode, text, json } = await this.requestJson<LoginResponse>(url, {
-      method: 'POST',
-      dispatcher: this.dispatcher,
-      headers,
-      body: bodyPayload
-    }, 'auth.login');
-    logApiResponse({ label: 'auth.login', statusCode, body: text });
+    this.loginInFlight = (async () => {
+      const url = this.endpoint('SignIn/Login');
+      const headers = this.baseHeaders();
+      const bodyPayload = JSON.stringify({ username, password, remember: false });
 
-    const response = json ?? {};
-    if (statusCode >= 400 || response.isSuccess === false) throw new Error(response.message ?? `status ${statusCode}`);
+      const { statusCode, json, text } = await this.requestJson<LoginResponse>(
+        url,
+        {
+          method: 'POST',
+          dispatcher: this.dispatcher,
+          headers,
+          body: bodyPayload
+        },
+        'auth.login'
+      );
 
-    const token = response.token ?? (response.data && typeof response.data === 'object' ? String((response.data as Record<string, unknown>).token ?? '') : '') ?? '';
-    const normalizedToken = token || response.jwt || '';
-    if (!normalizedToken) throw new Error('Missing token in login response');
-    return normalizedToken;
+      const response = json ?? {};
+      if (response.status === false) {
+        logApiResponse({ label: 'auth.login.status.false', statusCode, body: text });
+        throw new Error(response.message ?? 'Authentication failed (status=false)');
+      }
+      if (statusCode >= 400 || response.isSuccess === false) throw new Error(response.message ?? `status ${statusCode}`);
+
+      const token =
+        response.token ??
+        response.accessToken ??
+        (response.data && typeof response.data === 'object' ? String((response.data as Record<string, unknown>).token ?? '') : '') ??
+        '';
+      const normalizedToken = token || response.jwt || '';
+      if (!normalizedToken) {
+        logApiResponse({ label: 'auth.login.missing-token', statusCode, body: text });
+        throw new Error('Missing token in login response');
+      }
+      return normalizedToken;
+    })();
+
+    try {
+      return await this.loginInFlight;
+    } finally {
+      this.loginInFlight = null;
+    }
   }
+
 
   async getServerTimeOffsetMs(): Promise<number> {
     const start = Date.now();
