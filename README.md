@@ -1,77 +1,98 @@
 # Project GoodWillHunting
 
-A high-performance, multi-account, API-ONLY Sovereign Sniper Engine for ShopGoodwill.
+A multi-account, API-only ShopGoodwill sniper with a staged **Query -> Display -> Lock** workflow.
 
-## SETUP
+## Setup
 
-1. Install **Node.js 20+**.
-2. Install dependencies (explicit command requested):
+1. Install Node.js 20+.
+2. Install required runtime packages:
 
 ```bash
 npm install undici express dotenv ws
 ```
 
-3. Then install project dev/runtime lock set:
+3. Install project dependencies:
 
 ```bash
 npm install
 ```
 
-## ACCOUNTS
+4. Create credentials file:
 
-Create `accounts.json` in the project root:
+```bash
+cp accounts.example.json accounts.json
+```
+
+5. Start server:
+
+```bash
+npm run dev
+```
+
+Open: `http://localhost:3000`
+
+## accounts.json
+
+Put your credentials in `accounts.json`:
 
 ```json
 [
   {
     "id": "AccountA",
-    "username": "your-username",
+    "username": "you@example.com",
     "password": "your-password"
-  },
-  {
-    "id": "AccountB",
-    "username": "your-second-username",
-    "password": "your-second-password"
   }
 ]
 ```
 
-The engine stores active JWT snapshots in `sessions.json` and re-authenticates only when token expiry is detected.
+## Workflow (Query -> Display -> Lock)
 
-## THE COMMAND
+1. Input credentials into `accounts.json`.
+2. Start server.
+3. Use the search bar to **Query** an item by **Item ID**.
+4. Review details in the table (UNCONFIRMED).
+5. Set **Max Bid** and click **LOCK** to authorize the snipe.
 
-On the official ShopGoodwill site:
+Only **CONFIRMED** rows are eligible for execution.
 
-1. Heart/favorite the item.
-2. Open the Favorite **Notes** field.
-3. Enter JSON like:
+## API Mapping
 
-```json
-{"max": 100.00}
-```
+- Base URL: `https://buyerapi.shopgoodwill.com/api/`
+- Login: `POST /SignIn/Login`
+  - Payload: `{ "UserName": "...", "Password": "..." }`
+- Query: `GET /Auction/GetItemDetail?itemId=[ID]`
+- Bid: `POST /Auction/PlaceBid`
 
-Optional stepped note format:
+Required request headers on buyer API calls:
+- Confirmation switch for token persistence: `SGW_LOGIN_PERSISTENCE_CONFIRMATION_SWITCH=true` (set to `false` to disable `sessions.json` token persistence).
+- `Authority: buyerapi.shopgoodwill.com`
+- `Content-Type: application/json`
+- `Origin: https://www.shopgoodwill.com`
+- `Referer: https://www.shopgoodwill.com/`
+- `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36`
 
-```json
-{"max": 150.00, "step": 1.00}
-```
+## Precision
 
-Favorites are synced every 60 seconds. Any favorite with valid `max` note JSON becomes a LIVE target and is queued automatically.
+- Clock drift is synced from API `Date` header.
+- Snipes are fired at **T-2.5 seconds** and only for **CONFIRMED** items.
 
-## PRECISION ADVISORY
 
-Operate the script with stable network and system load during the **Berkland Window** (final ~3 seconds):
+## Verbose Diagnostic Layer
 
-- Startup clock offset is synced from ShopGoodwill API `Date` header.
-- TLS/API pre-warm occurs at **T-10s**.
-- Proxy bid is fired at **T-2.5s**.
-- Final execution path uses `Atomics.wait` + `process.hrtime()` nanosecond spin to minimize drift.
+- Authentication performs a pre-flight `GET https://www.shopgoodwill.com/SignIn/` and persists affinity cookies (`TiPMix`, `x-ms-routing-name`) plus session cookies for subsequent `SignIn/Login` and API calls.
 
-## Quick Start
+The server now emits high-visibility logs for auth/routing/api traces:
 
-```bash
-cp accounts.example.json accounts.json
-npm run dev
-```
+- `[AUTH-STATE]` current active session + token readiness on route changes.
+- `[API-REQUEST]` full URL, method, and headers for login/API calls.
+- `[API-RESPONSE]` status code and raw response body text.
+- `[ROUTING]` from/to paths and final status code for API requests.
+- `[WORKFLOW]` state-machine dispatch/block events (including no active session guards).
 
-Open `http://localhost:3000`.
+Snipe dispatch is blocked unless an active authenticated session exists.
+
+- Client state refresh uses adaptive back-off when `activeSession` is false to reduce request spam and rate-limit pressure.
+
+- Login failures (`status:false` or missing token) trigger a 60-second auth back-off to prevent request hammering.
+
+- Preflight logs now include `[DEBUG-PREFLIGHT-FINAL-URL]` and per-cookie domain diagnostics (`[DEBUG-COOKIE-DOMAIN]`) to detect Azure gatekeeper affinity.
