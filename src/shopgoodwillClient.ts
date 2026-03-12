@@ -2,6 +2,7 @@ import { Agent, request } from 'undici';
 import type { AppConfig } from './config.js';
 import { logApiRequest, logApiResponse } from './diagnostics.js';
 import type { BidPayload, FavoriteItem, FavoriteResponse, ItemDetailResponse, LoginResponse, PlaceBidResult } from './types.js';
+import { buildEncryptedLoginPayload } from './services/auth.js';
 
 export class ShopGoodwillClient {
   private readonly dispatcher: Agent;
@@ -26,12 +27,19 @@ export class ShopGoodwillClient {
       await this.preflightSessionCookie();
 
       const url = this.endpoint('SignIn/Login');
-      const jsonPayload = { UserName: username, Password: password, __RequestVerificationToken: this.csrfToken, rememberMe: false };
-      console.log('[DEBUG-PAYLOAD]', JSON.stringify({ ...jsonPayload, Password: '****' }));
+      const jsonPayload = buildEncryptedLoginPayload(username, password, this.csrfToken || undefined, this.config);
+      console.log(
+        '[DEBUG-PAYLOAD]',
+        JSON.stringify({
+          ...jsonPayload,
+          userName: `${jsonPayload.userName.slice(0, 8)}...`,
+          password: `${jsonPayload.password.slice(0, 8)}...`
+        })
+      );
 
       const jsonHeaders = {
         ...this.baseHeaders(),
-        RequestVerificationToken: this.csrfToken,
+        ...(this.csrfToken ? { RequestVerificationToken: this.csrfToken } : {}),
         referer: 'https://shopgoodwill.com/SignIn/'
       };
 
@@ -53,6 +61,8 @@ export class ShopGoodwillClient {
       if (payload.status === false) {
         this.nextLoginAttemptAt = Date.now() + 60_000;
         console.error('API Rejected Credentials:', payload.message ?? text);
+        console.error('[DEBUG-AUTH] Full buyerapi response:', text);
+        console.error('[DEBUG-AUTH] buyerapi headers:', JSON.stringify(headers));
         logApiResponse({ label: 'auth.login.status.false', statusCode, body: text });
         throw new Error(this.classifyAuthFailure(statusCode, payload.message ?? text));
       }
@@ -230,9 +240,6 @@ export class ShopGoodwillClient {
         continue;
       }
 
-      if (!this.csrfToken) {
-        throw new Error('Auth preflight failed: __RequestVerificationToken not found');
-      }
       return;
     }
 
