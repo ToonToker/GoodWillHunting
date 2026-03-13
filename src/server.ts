@@ -110,17 +110,28 @@ async function boot(): Promise<void> {
     }
 
     const itemId = extractItemId(String(req.body?.query ?? ''));
+    const requestedAccount = String(req.body?.account ?? '').trim();
     if (!itemId) {
       res.status(400).json({ ok: false, message: 'Provide an item ID or URL.' });
       return;
     }
+    if (requestedAccount && !sessions.some((s) => s.id === requestedAccount)) {
+      res.status(404).json({ ok: false, message: 'account not found' });
+      return;
+    }
 
     try {
-      const token = sessions.find((s) => s.connected && s.token)?.token;
-      const accountId = sessions.find((s) => s.connected && s.token)?.id ?? sessions[0]?.id ?? 'UNASSIGNED';
+      const accountId = requestedAccount || (sessions.find((s) => s.connected && s.token)?.id ?? sessions[0]?.id ?? 'UNASSIGNED');
+      const token = sessions.find((s) => s.id === accountId && s.connected && s.token)?.token;
+      if (!token) {
+        res.status(503).json({ ok: false, message: `No active bearer token for account ${accountId}.` });
+        return;
+      }
       const detail = await client.getItemDetail(itemId, token);
       const row = toBattleRowFromItemDetail(detail, accountId, offset, itemId);
       engine.addOrUpdateQueriedItem(row);
+      assignments.set(row.itemId, accountId);
+      await assignmentStore.save(assignments);
       res.json({ ok: true, itemId: row.itemId });
     } catch (error) {
       res.status(502).json({ ok: false, message: (error as Error).message });
@@ -264,18 +275,8 @@ function accountState(sessions: AccountSession[]): Array<{ id: string; username:
 function extractItemId(input: string): number | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
-  if (/^\d+$/.test(trimmed)) return Number(trimmed);
-
-  try {
-    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-    const parsed = new URL(normalized);
-    const itemParam = Number(parsed.searchParams.get('itemid') ?? parsed.searchParams.get('itemId'));
-    if (Number.isFinite(itemParam)) return itemParam;
-    const match = parsed.pathname.match(/(\d{5,})/);
-    return match ? Number(match[1]) : null;
-  } catch {
-    return null;
-  }
+  const itemId = trimmed.match(/\/item\/(\d+)/)?.[1] || trimmed.match(/^(\d+)$/)?.[0];
+  return itemId ? Number(itemId) : null;
 }
 
 

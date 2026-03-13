@@ -49,6 +49,17 @@ function renderHeartbeats() {
     .join('');
 }
 
+function renderQueryAccounts() {
+  const queryAccount = document.getElementById('queryAccount');
+  if (!queryAccount) return;
+  const selected = queryAccount.value;
+  const options = ['<option value="">Auto account</option>'];
+  for (const acc of accounts) {
+    options.push(`<option value="${acc.id}" ${selected === acc.id ? 'selected' : ''}>${acc.id}</option>`);
+  }
+  queryAccount.innerHTML = options.join('');
+}
+
 function renderAccounts() {
   accountsNode.innerHTML = accounts
     .map(
@@ -67,6 +78,7 @@ function renderAccounts() {
   });
 
   renderHeartbeats();
+  renderQueryAccounts();
 }
 
 function assignmentOptions(itemId) {
@@ -169,10 +181,11 @@ function scheduleStateSync() {
 
 document.getElementById('queryItem').onclick = async () => {
   const query = document.getElementById('itemQuery').value.trim();
+  const account = document.getElementById('queryAccount')?.value || '';
   const res = await fetch('/api/query', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ query })
+    body: JSON.stringify({ query, account })
   });
   const data = await res.json();
   if (!data.ok) {
