@@ -8,6 +8,23 @@ let targets = [];
 let accounts = [];
 let assignments = {};
 
+try {
+  const persistedAccounts = localStorage.getItem('accounts');
+  if (persistedAccounts) {
+    const parsed = JSON.parse(persistedAccounts);
+    const fakePattern = /^(2|sdafdafs|test|fake|dummy)$/i;
+    const hasInvalid = Array.isArray(parsed)
+      ? parsed.some((entry) => {
+          const candidate = String(entry?.username ?? entry?.email ?? entry?.id ?? '').trim();
+          return !candidate.includes('@') || fakePattern.test(candidate);
+        })
+      : true;
+    if (hasInvalid) localStorage.removeItem('accounts');
+  }
+} catch {
+  localStorage.removeItem('accounts');
+}
+
 function formatCountdown(endTimeMs) {
   const ms = endTimeMs - Date.now();
   if (ms <= 0) return '00:00.000';
@@ -20,6 +37,21 @@ function formatCountdown(endTimeMs) {
 
 function formatEndTime(endTimeMs) {
   return new Date(endTimeMs).toLocaleString();
+}
+
+
+function getAccountTruth(account) {
+  const isConnected = account?.connected === 1 || account?.connected === true;
+  const tokenLength = Number(account?.tokenLength ?? 0);
+  const hasValidToken = tokenLength > 50;
+
+  if (isConnected && hasValidToken) {
+    return { label: 'ONLINE', color: 'bg-emerald-900 text-emerald-300', icon: '✅' };
+  }
+  if (account?.lastError) {
+    return { label: 'ERROR', color: 'bg-rose-900 text-rose-300', icon: '⚠️' };
+  }
+  return { label: 'OFFLINE', color: 'bg-slate-700 text-slate-300', icon: '⚪' };
 }
 
 function statusBadge(status) {
@@ -36,17 +68,31 @@ function statusBadge(status) {
 function renderHeartbeats() {
   heartbeatsNode.innerHTML = accounts
     .map(
-      (a) => `<div class="bg-slate-800 border border-slate-700 rounded p-3">
+      (a) => {
+        const status = getAccountTruth(a);
+        return `<div class="bg-slate-800 border border-slate-700 rounded p-3">
         <div class="flex justify-between items-center">
           <div class="font-medium">${a.id}</div>
-          <span class="text-xs px-2 py-0.5 rounded ${a.connected ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${a.connected ? 'ONLINE' : 'OFFLINE'}</span>
+          <span class="text-xs px-2 py-0.5 rounded ${status.color}">${status.icon} ${status.label}</span>
         </div>
         <div class="text-xs text-slate-400 mt-1">${a.username}</div>
         <div class="text-xs text-slate-500 mt-1">Token: ${new Date(a.refreshedAt).toLocaleTimeString()}</div>
         ${a.lastError ? `<div class="text-xs text-rose-400 mt-1">${a.lastError}</div>` : ''}
-      </div>`
+      </div>`;
+      }
     )
     .join('');
+}
+
+function renderQueryAccounts() {
+  const queryAccount = document.getElementById('queryAccount');
+  if (!queryAccount) return;
+  const selected = queryAccount.value;
+  const options = ['<option value="">Auto account</option>'];
+  for (const acc of accounts) {
+    options.push(`<option value="${acc.id}" ${selected === acc.id ? 'selected' : ''}>${acc.id}</option>`);
+  }
+  queryAccount.innerHTML = options.join('');
 }
 
 function renderAccounts() {
@@ -67,6 +113,7 @@ function renderAccounts() {
   });
 
   renderHeartbeats();
+  renderQueryAccounts();
 }
 
 function assignmentOptions(itemId) {
@@ -169,10 +216,11 @@ function scheduleStateSync() {
 
 document.getElementById('queryItem').onclick = async () => {
   const query = document.getElementById('itemQuery').value.trim();
+  const account = document.getElementById('queryAccount')?.value || '';
   const res = await fetch('/api/query', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ query })
+    body: JSON.stringify({ query, account })
   });
   const data = await res.json();
   if (!data.ok) {

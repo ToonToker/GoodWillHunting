@@ -226,10 +226,30 @@ export function toBattleRowFromItemDetail(
 ): BattleRow {
   const itemId = Number(detail.itemId ?? detail.ItemId ?? fallbackItemId);
   const sellerId = Number(detail.sellerId ?? detail.SellerID ?? 0);
-  const endTimeRaw = String(detail.endTime ?? detail.EndTime ?? detail.endDate ?? detail.EndDate ?? '');
+  const endTimeRaw = String(
+    detail.endTime ??
+      detail.EndTime ??
+      detail.endDate ??
+      detail.EndDate ??
+      detail.expiration ??
+      detail.Expiration ??
+      detail.expirationTime ??
+      detail.ExpirationTime ??
+      ''
+  );
   const parsedEnd = Date.parse(endTimeRaw);
   const endTimeMs = Number.isFinite(parsedEnd) ? parsedEnd + clockOffsetMs : Date.now() + 60_000;
-  const currentPrice = Number(detail.currentPrice ?? detail.CurrentPrice ?? detail.minimumBid ?? detail.MinimumBid ?? 0);
+  const currentPrice = Number(
+    detail.currentBid ??
+      detail.CurrentBid ??
+      detail.highBid ??
+      detail.HighBid ??
+      detail.currentPrice ??
+      detail.CurrentPrice ??
+      detail.minimumBid ??
+      detail.MinimumBid ??
+      0
+  );
   const title = String(detail.title ?? detail.Title ?? `Item ${itemId}`);
   const imageUrl = String(detail.imageUrl ?? detail.ImageUrl ?? detail.imageURL ?? detail.ImageURL ?? '');
 
