@@ -108,10 +108,17 @@ async function boot(): Promise<void> {
       return;
     }
 
-    const itemId = extractItemId(String(req.body?.query ?? ''));
+    const rawInput = String(req.body?.query ?? req.body?.itemId ?? '').trim();
+    const match = rawInput.match(/(\d{7,10})/);
+    const itemId = match ? Number.parseInt(match[0], 10) : null;
     const requestedAccount = String(req.body?.account ?? '').trim();
-    if (!itemId) {
-      res.status(400).json({ ok: false, message: 'Provide an item ID or URL.' });
+    if (!itemId || Number.isNaN(itemId)) {
+      res.status(400).json({ ok: false, message: 'Provide a valid 9-digit Item ID or ShopGoodwill URL.' });
+      return;
+    }
+    console.log(`[QUERY-ENGINE] Unified extraction success: ${itemId}`);
+    if (requestedAccount && !sessions.some((s) => s.id === requestedAccount)) {
+      res.status(404).json({ ok: false, message: 'account not found' });
       return;
     }
     if (requestedAccount && !sessions.some((s) => s.id === requestedAccount)) {
@@ -261,7 +268,7 @@ async function loginAccount(client: ShopGoodwillClient, account: AccountCredenti
   }
 }
 
-function accountState(sessions: AccountSession[]): Array<{ id: string; username: string; refreshedAt: number; connected: boolean; authState: 'online' | 'offline' | 'rejected'; lastError: string | null }> {
+function accountState(sessions: AccountSession[]): Array<{ id: string; username: string; refreshedAt: number; connected: boolean; tokenLength: number; authState: 'online' | 'offline' | 'rejected'; lastError: string | null }> {
   return sessions.map((s) => {
     const lastError = s.lastError ?? null;
     const error = String(lastError ?? '').toLowerCase();
@@ -280,21 +287,12 @@ function accountState(sessions: AccountSession[]): Array<{ id: string; username:
       username: s.username,
       refreshedAt: s.refreshedAt,
       connected: s.connected,
+      tokenLength: s.token.length,
       authState: s.connected ? 'online' : rejected ? 'rejected' : 'offline',
       lastError
     };
   });
 }
-
-function extractItemId(input: string): number | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  const normalizedDigits = trimmed.replace(/\D/g, '');
-  if (!normalizedDigits) return null;
-  const itemId = Number(normalizedDigits);
-  return Number.isFinite(itemId) ? itemId : null;
-}
-
 
 function safePathFromReferer(referer: string): string {
   try {

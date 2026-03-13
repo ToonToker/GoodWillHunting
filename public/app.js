@@ -39,6 +39,21 @@ function formatEndTime(endTimeMs) {
   return new Date(endTimeMs).toLocaleString();
 }
 
+
+function getAccountTruth(account) {
+  const isConnected = account?.connected === 1 || account?.connected === true;
+  const tokenLength = Number(account?.tokenLength ?? 0);
+  const hasValidToken = tokenLength > 50;
+
+  if (isConnected && hasValidToken) {
+    return { label: 'ONLINE', color: 'bg-emerald-900 text-emerald-300', icon: '✅' };
+  }
+  if (account?.lastError) {
+    return { label: 'ERROR', color: 'bg-rose-900 text-rose-300', icon: '⚠️' };
+  }
+  return { label: 'OFFLINE', color: 'bg-slate-700 text-slate-300', icon: '⚪' };
+}
+
 function statusBadge(status) {
   const key = String(status || '').toLowerCase();
   if (key === 'unconfirmed') return '<span class="px-2 py-1 rounded text-xs font-semibold bg-amber-900 text-amber-300">UNCONFIRMED</span>';
@@ -53,15 +68,18 @@ function statusBadge(status) {
 function renderHeartbeats() {
   heartbeatsNode.innerHTML = accounts
     .map(
-      (a) => `<div class="bg-slate-800 border border-slate-700 rounded p-3">
+      (a) => {
+        const status = getAccountTruth(a);
+        return `<div class="bg-slate-800 border border-slate-700 rounded p-3">
         <div class="flex justify-between items-center">
           <div class="font-medium">${a.id}</div>
-          <span class="text-xs px-2 py-0.5 rounded ${a.authState === 'online' ? 'bg-emerald-900 text-emerald-300' : a.authState === 'rejected' ? 'bg-amber-900 text-amber-300' : 'bg-rose-900 text-rose-300'}">${a.authState === 'online' ? 'ONLINE' : a.authState === 'rejected' ? 'OFFLINE/REJECTED' : 'OFFLINE'}</span>
+          <span class="text-xs px-2 py-0.5 rounded ${status.color}">${status.icon} ${status.label}</span>
         </div>
         <div class="text-xs text-slate-400 mt-1">${a.username}</div>
         <div class="text-xs text-slate-500 mt-1">Token: ${new Date(a.refreshedAt).toLocaleTimeString()}</div>
         ${a.lastError ? `<div class="text-xs text-rose-400 mt-1">${a.lastError}</div>` : ''}
-      </div>`
+      </div>`;
+      }
     )
     .join('');
 }
