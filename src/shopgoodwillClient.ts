@@ -10,6 +10,7 @@ export class ShopGoodwillClient {
   private nextLoginAttemptAt = 0;
   private readonly cookieJar = new Map<string, string>();
   private readonly handshakeUserAgent: string;
+  private firstFavoriteItemLogged = false;
   private csrfToken = '';
 
   constructor(private readonly config: AppConfig) {
@@ -149,19 +150,46 @@ export class ShopGoodwillClient {
   }
 
   async getFavorites(token: string): Promise<FavoriteItem[]> {
-    const url = this.endpoint('Member/GetFavoriteItems');
+    const url = this.endpoint('Favorite/GetFavoriteItemsByUser');
     const { statusCode, json } = await this.requestJson<FavoriteResponse>(
       url,
       {
         method: 'GET',
         dispatcher: this.dispatcher,
-        headers: this.authHeaders(token)
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Requested-With': 'XMLHttpRequest',
+          Accept: 'application/json',
+          Referer: 'https://shopgoodwill.com/favorites',
+          'User-Agent': this.handshakeUserAgent
+        }
       },
       'favorites.get'
     );
 
+    if (statusCode === 404) {
+      console.warn('[WARN] favorites.get returned 404. Re-check whether ?userId=<id> is required by the API endpoint.');
+      throw new Error(`favorites status ${statusCode}`);
+    }
+
     if (statusCode >= 400) throw new Error(`favorites status ${statusCode}`);
-    return json?.data ?? json?.items ?? [];
+
+    const favorites = Array.isArray(json)
+      ? (json as unknown as FavoriteItem[])
+      : Array.isArray(json?.data)
+        ? json.data
+        : Array.isArray(json?.items)
+          ? json.items
+          : [];
+
+    if (favorites.length === 0) {
+      console.info('[INFO] No favorites found in account.');
+    } else if (!this.firstFavoriteItemLogged) {
+      this.firstFavoriteItemLogged = true;
+      console.info('[DEBUG-FAVORITES] first item payload:', JSON.stringify(favorites[0]));
+    }
+
+    return favorites;
   }
 
   async warmBidConnection(token: string): Promise<void> {

@@ -92,6 +92,7 @@ export class SniperEngine {
       const favorites = await this.client.getFavorites(session.token);
       session.connected = true;
       session.lastError = undefined;
+      logWorkflow({ event: 'poll.session-awake', activeSession: true, detail: `account=${session.id} connected=1` });
 
       for (const fav of favorites) {
         const itemId = Number(fav.itemId ?? fav.ItemId);
