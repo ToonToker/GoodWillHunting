@@ -25,7 +25,6 @@ async function boot(): Promise<void> {
   const client = new ShopGoodwillClient(config);
   const store = new LocalSessionStore('sessions.json', config.loginPersistenceConfirmationSwitch);
   const assignmentStore = new AssignmentStore('assignments.json');
-  const tokenCache = await store.loadTokens();
   const assignments = await assignmentStore.load();
 
   let offset = 0;
@@ -42,7 +41,7 @@ async function boot(): Promise<void> {
 
   const sessions: AccountSession[] = [];
   for (const account of accountVault) {
-    const session = await loginAccount(client, account, tokenCache.get(account.id));
+    const session = await loginAccount(client, account);
     sessions.push(session);
   }
 
@@ -110,17 +109,28 @@ async function boot(): Promise<void> {
     }
 
     const itemId = extractItemId(String(req.body?.query ?? ''));
+    const requestedAccount = String(req.body?.account ?? '').trim();
     if (!itemId) {
       res.status(400).json({ ok: false, message: 'Provide an item ID or URL.' });
       return;
     }
+    if (requestedAccount && !sessions.some((s) => s.id === requestedAccount)) {
+      res.status(404).json({ ok: false, message: 'account not found' });
+      return;
+    }
 
     try {
-      const token = sessions.find((s) => s.connected && s.token)?.token;
-      const accountId = sessions.find((s) => s.connected && s.token)?.id ?? sessions[0]?.id ?? 'UNASSIGNED';
+      const accountId = requestedAccount || (sessions.find((s) => s.connected && s.token)?.id ?? sessions[0]?.id ?? 'UNASSIGNED');
+      const token = sessions.find((s) => s.id === accountId && s.connected && s.token)?.token;
+      if (!token) {
+        res.status(503).json({ ok: false, message: `No active bearer token for account ${accountId}.` });
+        return;
+      }
       const detail = await client.getItemDetail(itemId, token);
       const row = toBattleRowFromItemDetail(detail, accountId, offset, itemId);
       engine.addOrUpdateQueriedItem(row);
+      assignments.set(row.itemId, accountId);
+      await assignmentStore.save(assignments);
       res.json({ ok: true, itemId: row.itemId });
     } catch (error) {
       res.status(502).json({ ok: false, message: (error as Error).message });
@@ -227,9 +237,9 @@ async function boot(): Promise<void> {
   });
 }
 
-async function loginAccount(client: ShopGoodwillClient, account: AccountCredential | AccountSession, cached?: string): Promise<AccountSession> {
+async function loginAccount(client: ShopGoodwillClient, account: AccountCredential | AccountSession): Promise<AccountSession> {
   try {
-    const token = cached ?? (await client.login(account.username, account.password));
+    const token = await client.login(account.username, account.password);
     return {
       id: account.id,
       username: account.username,
@@ -251,31 +261,38 @@ async function loginAccount(client: ShopGoodwillClient, account: AccountCredenti
   }
 }
 
-function accountState(sessions: AccountSession[]): Array<{ id: string; username: string; refreshedAt: number; connected: boolean; lastError: string | null }> {
-  return sessions.map((s) => ({
-    id: s.id,
-    username: s.username,
-    refreshedAt: s.refreshedAt,
-    connected: s.connected,
-    lastError: s.lastError ?? null
-  }));
+function accountState(sessions: AccountSession[]): Array<{ id: string; username: string; refreshedAt: number; connected: boolean; authState: 'online' | 'offline' | 'rejected'; lastError: string | null }> {
+  return sessions.map((s) => {
+    const lastError = s.lastError ?? null;
+    const error = String(lastError ?? '').toLowerCase();
+    const rejected =
+      !s.connected &&
+      (error.includes('authentication failed') ||
+        error.includes('invalid credentials') ||
+        error.includes('username or password') ||
+        error.includes('denied request') ||
+        error.includes('401') ||
+        error.includes('403') ||
+        error.includes('status.false'));
+
+    return {
+      id: s.id,
+      username: s.username,
+      refreshedAt: s.refreshedAt,
+      connected: s.connected,
+      authState: s.connected ? 'online' : rejected ? 'rejected' : 'offline',
+      lastError
+    };
+  });
 }
 
 function extractItemId(input: string): number | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
-  if (/^\d+$/.test(trimmed)) return Number(trimmed);
-
-  try {
-    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-    const parsed = new URL(normalized);
-    const itemParam = Number(parsed.searchParams.get('itemid') ?? parsed.searchParams.get('itemId'));
-    if (Number.isFinite(itemParam)) return itemParam;
-    const match = parsed.pathname.match(/(\d{5,})/);
-    return match ? Number(match[1]) : null;
-  } catch {
-    return null;
-  }
+  const normalizedDigits = trimmed.replace(/\D/g, '');
+  if (!normalizedDigits) return null;
+  const itemId = Number(normalizedDigits);
+  return Number.isFinite(itemId) ? itemId : null;
 }
 
 
