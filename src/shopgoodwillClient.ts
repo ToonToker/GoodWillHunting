@@ -10,6 +10,7 @@ export class ShopGoodwillClient {
   private nextLoginAttemptAt = 0;
   private readonly cookieJar = new Map<string, string>();
   private readonly handshakeUserAgent: string;
+  private firstFavoriteItemLogged = false;
   private csrfToken = '';
 
   constructor(private readonly config: AppConfig) {
@@ -49,6 +50,7 @@ export class ShopGoodwillClient {
           method: 'POST',
           dispatcher: this.dispatcher,
           headers: jsonHeaders,
+          // parity with browser "withCredentials: true" behavior is maintained via cookie-jar propagation in requestJson.
           body: JSON.stringify(jsonPayload)
         },
         'auth.login'
@@ -58,10 +60,12 @@ export class ShopGoodwillClient {
       this.logCookieDiagnostics('auth.login');
 
       const payload = response ?? {};
+      console.info('[DEBUG-AUTH] loginResponse.data:', JSON.stringify(payload.data ?? null));
       if (payload.status === false) {
         this.nextLoginAttemptAt = Date.now() + 60_000;
         console.error('API Rejected Credentials:', payload.message ?? text);
         console.error('[DEBUG-AUTH] Full buyerapi response:', text);
+        console.error('[DEBUG-AUTH] loginResponse.data:', JSON.stringify(payload.data ?? null));
         console.error('[DEBUG-AUTH] buyerapi headers:', JSON.stringify(headers));
         logApiResponse({ label: 'auth.login.status.false', statusCode, body: text });
         throw new Error(this.classifyAuthFailure(statusCode, payload.message ?? text));
@@ -72,20 +76,31 @@ export class ShopGoodwillClient {
         throw new Error(this.classifyAuthFailure(statusCode, payload.message ?? `status ${statusCode}`));
       }
 
-      const token =
-        payload.token ??
+      const payloadData = payload.data && typeof payload.data === 'object' ? (payload.data as Record<string, unknown>) : {};
+      const accessToken =
         payload.accessToken ??
-        (payload.data && typeof payload.data === 'object' ? String((payload.data as Record<string, unknown>).token ?? '') : '') ??
+        (typeof payloadData.accessToken === 'string' ? payloadData.accessToken : '') ??
+        payload.token ??
+        (typeof payloadData.token === 'string' ? payloadData.token : '') ??
+        payload.jwt ??
         '';
-      const normalizedToken = token || payload.jwt || payload.refreshToken || '';
-      if (!normalizedToken) {
+      const refreshToken =
+        payload.refreshToken ??
+        (typeof payloadData.refreshToken === 'string' ? payloadData.refreshToken : '') ??
+        '';
+
+      if (!accessToken) {
         this.nextLoginAttemptAt = Date.now() + 60_000;
         logApiResponse({ label: 'auth.login.missing-token', statusCode, body: text });
         throw new Error('Missing token in login response');
       }
 
+      console.info(
+        `[DEBUG-AUTH] token extract status=true accessToken=${accessToken ? 'present' : 'missing'} refreshToken=${refreshToken ? 'present' : 'missing'}`
+      );
+
       this.nextLoginAttemptAt = 0;
-      return normalizedToken;
+      return accessToken;
     })();
 
     try {
@@ -135,19 +150,46 @@ export class ShopGoodwillClient {
   }
 
   async getFavorites(token: string): Promise<FavoriteItem[]> {
-    const url = this.endpoint('Member/GetFavoriteItems');
+    const url = this.endpoint('Favorite/GetFavoriteItemsByUser');
     const { statusCode, json } = await this.requestJson<FavoriteResponse>(
       url,
       {
         method: 'GET',
         dispatcher: this.dispatcher,
-        headers: this.authHeaders(token)
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Requested-With': 'XMLHttpRequest',
+          Accept: 'application/json',
+          Referer: 'https://shopgoodwill.com/favorites',
+          'User-Agent': this.handshakeUserAgent
+        }
       },
       'favorites.get'
     );
 
+    if (statusCode === 404) {
+      console.warn('[WARN] favorites.get returned 404. Re-check whether ?userId=<id> is required by the API endpoint.');
+      throw new Error(`favorites status ${statusCode}`);
+    }
+
     if (statusCode >= 400) throw new Error(`favorites status ${statusCode}`);
-    return json?.data ?? json?.items ?? [];
+
+    const favorites = Array.isArray(json)
+      ? (json as unknown as FavoriteItem[])
+      : Array.isArray(json?.data)
+        ? json.data
+        : Array.isArray(json?.items)
+          ? json.items
+          : [];
+
+    if (favorites.length === 0) {
+      console.info('[INFO] No favorites found in account.');
+    } else if (!this.firstFavoriteItemLogged) {
+      this.firstFavoriteItemLogged = true;
+      console.info('[DEBUG-FAVORITES] first item payload:', JSON.stringify(favorites[0]));
+    }
+
+    return favorites;
   }
 
   async warmBidConnection(token: string): Promise<void> {

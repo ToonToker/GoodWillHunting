@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { loadAccounts, loadConfig } from './config.js';
 import { logInfo } from './logger.js';
 
