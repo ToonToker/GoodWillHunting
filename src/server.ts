@@ -25,7 +25,6 @@ async function boot(): Promise<void> {
   const client = new ShopGoodwillClient(config);
   const store = new LocalSessionStore('sessions.json', config.loginPersistenceConfirmationSwitch);
   const assignmentStore = new AssignmentStore('assignments.json');
-  const tokenCache = await store.loadTokens();
   const assignments = await assignmentStore.load();
 
   let offset = 0;
@@ -42,7 +41,7 @@ async function boot(): Promise<void> {
 
   const sessions: AccountSession[] = [];
   for (const account of accountVault) {
-    const session = await loginAccount(client, account, tokenCache.get(account.id));
+    const session = await loginAccount(client, account);
     sessions.push(session);
   }
 
@@ -238,9 +237,9 @@ async function boot(): Promise<void> {
   });
 }
 
-async function loginAccount(client: ShopGoodwillClient, account: AccountCredential | AccountSession, cached?: string): Promise<AccountSession> {
+async function loginAccount(client: ShopGoodwillClient, account: AccountCredential | AccountSession): Promise<AccountSession> {
   try {
-    const token = cached ?? (await client.login(account.username, account.password));
+    const token = await client.login(account.username, account.password);
     return {
       id: account.id,
       username: account.username,
@@ -262,21 +261,38 @@ async function loginAccount(client: ShopGoodwillClient, account: AccountCredenti
   }
 }
 
-function accountState(sessions: AccountSession[]): Array<{ id: string; username: string; refreshedAt: number; connected: boolean; lastError: string | null }> {
-  return sessions.map((s) => ({
-    id: s.id,
-    username: s.username,
-    refreshedAt: s.refreshedAt,
-    connected: s.connected,
-    lastError: s.lastError ?? null
-  }));
+function accountState(sessions: AccountSession[]): Array<{ id: string; username: string; refreshedAt: number; connected: boolean; authState: 'online' | 'offline' | 'rejected'; lastError: string | null }> {
+  return sessions.map((s) => {
+    const lastError = s.lastError ?? null;
+    const error = String(lastError ?? '').toLowerCase();
+    const rejected =
+      !s.connected &&
+      (error.includes('authentication failed') ||
+        error.includes('invalid credentials') ||
+        error.includes('username or password') ||
+        error.includes('denied request') ||
+        error.includes('401') ||
+        error.includes('403') ||
+        error.includes('status.false'));
+
+    return {
+      id: s.id,
+      username: s.username,
+      refreshedAt: s.refreshedAt,
+      connected: s.connected,
+      authState: s.connected ? 'online' : rejected ? 'rejected' : 'offline',
+      lastError
+    };
+  });
 }
 
 function extractItemId(input: string): number | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
-  const itemId = trimmed.match(/\/item\/(\d+)/)?.[1] || trimmed.match(/^(\d+)$/)?.[0];
-  return itemId ? Number(itemId) : null;
+  const normalizedDigits = trimmed.replace(/\D/g, '');
+  if (!normalizedDigits) return null;
+  const itemId = Number(normalizedDigits);
+  return Number.isFinite(itemId) ? itemId : null;
 }
 
 

@@ -8,6 +8,23 @@ let targets = [];
 let accounts = [];
 let assignments = {};
 
+try {
+  const persistedAccounts = localStorage.getItem('accounts');
+  if (persistedAccounts) {
+    const parsed = JSON.parse(persistedAccounts);
+    const fakePattern = /^(2|sdafdafs|test|fake|dummy)$/i;
+    const hasInvalid = Array.isArray(parsed)
+      ? parsed.some((entry) => {
+          const candidate = String(entry?.username ?? entry?.email ?? entry?.id ?? '').trim();
+          return !candidate.includes('@') || fakePattern.test(candidate);
+        })
+      : true;
+    if (hasInvalid) localStorage.removeItem('accounts');
+  }
+} catch {
+  localStorage.removeItem('accounts');
+}
+
 function formatCountdown(endTimeMs) {
   const ms = endTimeMs - Date.now();
   if (ms <= 0) return '00:00.000';
@@ -39,7 +56,7 @@ function renderHeartbeats() {
       (a) => `<div class="bg-slate-800 border border-slate-700 rounded p-3">
         <div class="flex justify-between items-center">
           <div class="font-medium">${a.id}</div>
-          <span class="text-xs px-2 py-0.5 rounded ${a.connected ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${a.connected ? 'ONLINE' : 'OFFLINE'}</span>
+          <span class="text-xs px-2 py-0.5 rounded ${a.authState === 'online' ? 'bg-emerald-900 text-emerald-300' : a.authState === 'rejected' ? 'bg-amber-900 text-amber-300' : 'bg-rose-900 text-rose-300'}">${a.authState === 'online' ? 'ONLINE' : a.authState === 'rejected' ? 'OFFLINE/REJECTED' : 'OFFLINE'}</span>
         </div>
         <div class="text-xs text-slate-400 mt-1">${a.username}</div>
         <div class="text-xs text-slate-500 mt-1">Token: ${new Date(a.refreshedAt).toLocaleTimeString()}</div>
