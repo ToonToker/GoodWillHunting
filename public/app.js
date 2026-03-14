@@ -25,6 +25,33 @@ try {
   localStorage.removeItem('accounts');
 }
 
+
+function cleanupGhostLocalAccounts(serverAccounts) {
+  try {
+    const persistedAccounts = localStorage.getItem('accounts');
+    if (!persistedAccounts) return;
+    const parsed = JSON.parse(persistedAccounts);
+    if (!Array.isArray(parsed)) {
+      localStorage.removeItem('accounts');
+      return;
+    }
+
+    const activeIds = new Set((serverAccounts ?? []).map((a) => String(a.id ?? '').trim()).filter(Boolean));
+    const filtered = parsed.filter((entry) => {
+      const localId = String(entry?.id ?? '').trim();
+      const localUser = String(entry?.username ?? entry?.email ?? '').trim();
+      return (localId && activeIds.has(localId)) || (localUser && activeIds.has(localUser));
+    });
+
+    if (filtered.length !== parsed.length) {
+      if (filtered.length === 0) localStorage.removeItem('accounts');
+      else localStorage.setItem('accounts', JSON.stringify(filtered));
+    }
+  } catch {
+    localStorage.removeItem('accounts');
+  }
+}
+
 function formatCountdown(endTimeMs) {
   const ms = endTimeMs - Date.now();
   if (ms <= 0) return '00:00.000';
@@ -42,16 +69,16 @@ function formatEndTime(endTimeMs) {
 
 function getAccountTruth(account) {
   const isConnected = account?.connected === 1 || account?.connected === true;
-  const tokenLength = Number(account?.tokenLength ?? 0);
+  const tokenLength = typeof account?.token === 'string' ? account.token.length : Number(account?.tokenLength ?? 0);
   const hasValidToken = tokenLength > 50;
 
   if (isConnected && hasValidToken) {
     return { label: 'ONLINE', color: 'bg-emerald-900 text-emerald-300', icon: '✅' };
   }
   if (account?.lastError) {
-    return { label: 'ERROR', color: 'bg-rose-900 text-rose-300', icon: '⚠️' };
+    return { label: 'OFFLINE', color: 'bg-rose-900 text-rose-300', icon: '⚠️' };
   }
-  return { label: 'OFFLINE', color: 'bg-slate-700 text-slate-300', icon: '⚪' };
+  return { label: 'OFFLINE', color: 'bg-rose-900 text-rose-300', icon: '⚪' };
 }
 
 function statusBadge(status) {
@@ -196,6 +223,7 @@ async function fetchState() {
   const data = await res.json();
   targets = data.targets ?? [];
   accounts = data.accounts ?? [];
+  cleanupGhostLocalAccounts(accounts);
   assignments = data.assignments ?? {};
   latencyInfo.textContent = `Latency audit RTT: ${Number(data.avgRttMs ?? 0).toFixed(1)}ms | Trigger adjust: ${data.triggerAdjustMs ?? 0}ms`;
   renderAccounts();

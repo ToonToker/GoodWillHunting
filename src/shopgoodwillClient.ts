@@ -211,11 +211,13 @@ export class ShopGoodwillClient {
 
   async getItemDetail(itemId: number, token?: string): Promise<Record<string, unknown>> {
     const { statusCode, json } = await this.requestJson<ItemDetailResponse>(
-      this.endpoint(`Item/GetItemDetail?itemId=${itemId}`),
+      this.endpoint(`ItemDetail/GetItemDetailModelByItemId/${itemId}`),
       {
         method: 'GET',
         dispatcher: this.dispatcher,
-        headers: token ? this.authHeaders(token) : this.baseHeaders()
+        headers: token
+          ? { ...this.authHeaders(token), referer: `https://shopgoodwill.com/item/${itemId}` }
+          : { ...this.baseHeaders(), referer: `https://shopgoodwill.com/item/${itemId}` }
       },
       'auction.detail'
     );

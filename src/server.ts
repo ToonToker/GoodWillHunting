@@ -121,10 +121,6 @@ async function boot(): Promise<void> {
       res.status(404).json({ ok: false, message: 'account not found' });
       return;
     }
-    if (requestedAccount && !sessions.some((s) => s.id === requestedAccount)) {
-      res.status(404).json({ ok: false, message: 'account not found' });
-      return;
-    }
 
     try {
       const accountId = requestedAccount || (sessions.find((s) => s.connected && s.token)?.id ?? sessions[0]?.id ?? 'UNASSIGNED');
