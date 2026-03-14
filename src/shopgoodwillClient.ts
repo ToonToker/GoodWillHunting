@@ -11,6 +11,7 @@ export class ShopGoodwillClient {
   private readonly cookieJar = new Map<string, string>();
   private readonly handshakeUserAgent: string;
   private firstFavoriteItemLogged = false;
+  private firstItemDetailLogged = false;
   private csrfToken = '';
 
   constructor(private readonly config: AppConfig) {
@@ -210,16 +211,22 @@ export class ShopGoodwillClient {
 
   async getItemDetail(itemId: number, token?: string): Promise<Record<string, unknown>> {
     const { statusCode, json } = await this.requestJson<ItemDetailResponse>(
-      this.endpoint(`Auction/GetItemDetail?itemId=${itemId}`),
+      this.endpoint(`ItemDetail/GetItemDetailModelByItemId/${itemId}`),
       {
         method: 'GET',
         dispatcher: this.dispatcher,
-        headers: token ? this.authHeaders(token) : this.baseHeaders()
+        headers: token
+          ? { ...this.authHeaders(token), referer: `https://shopgoodwill.com/item/${itemId}` }
+          : { ...this.baseHeaders(), referer: `https://shopgoodwill.com/item/${itemId}` }
       },
       'auction.detail'
     );
 
     if (statusCode >= 400) throw new Error(json?.message ?? `item detail status ${statusCode}`);
+    if (!this.firstItemDetailLogged) {
+      this.firstItemDetailLogged = true;
+      console.info('[DEBUG-ITEM-DETAIL] full response:', JSON.stringify(json ?? null));
+    }
     const item = json?.data ?? json?.item;
     if (!item) throw new Error('Item detail response missing data payload');
     return item;
